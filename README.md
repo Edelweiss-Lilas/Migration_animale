@@ -12,7 +12,11 @@ L'équipe
 L'application a été créé par :
 
 Marie Vielmas 
+
 Clara Martin
-Fanny Suszko
+
+Fanny 
+
 Aristide Curtelin
+
 Valeria Fiorentini
