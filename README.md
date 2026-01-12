@@ -15,7 +15,7 @@ Marie Vielmas
 
 Clara Martin
 
-Fanny 
+Fanny Suszko
 
 Aristide Curtelin
 
