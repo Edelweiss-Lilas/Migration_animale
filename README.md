@@ -7,16 +7,17 @@ Entre 2021 et 2023, la station biologique du parc national de Doñana (EDB) en A
 La base de données sera accessible via une interface web. Les données seront présentées sous la forme de données structurées et de datavisualisation afin de sensibiliser sur l’impact de l’homme sur l'éthologie de ces rapaces.
 
 
-L'équipe 
+# L'équipe 
 
 L'application a été créé par :
 
-Marie Vielmas 
+- Marie Vielmas 
+- Clara Martin
+- Fanny Suszko
+- Aristide Curtelin
+- Valeria Fiorentini
 
-Clara Martin
-
-Fanny Suszko
-
-Aristide Curtelin
-
-Valeria Fiorentini
+# Deadlines
++ 08/02/2026 : Livrable n°3 => traitement de données
++ 23/02/2026 : Livrable n°4 => datavisualisation et journal de bord
++ 31/03/2026 : Livrable n°5 => application python
