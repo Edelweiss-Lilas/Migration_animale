@@ -1,0 +1,112 @@
+# Compte rendu de réunion – Avancement du projet (22/01/26)
+
+## 1. Point sur l’avancement du travail de chacun
+
+### Base des faucons — Aristide
+- Aristide a déjà rédigé un PDF présentant son travail.
+- Il a été décidé d’abandonner la base à 5 millions d’entrées pour se concentrer sur celle à 2 millions d’entrées, représentant une petite trentaine de faucons.
+- Plutôt que de travailler sur l’ensemble des bornages géographiques, nous ne conserverons qu’une borne sur 3, 4 ou 5 (selon un calcul qu’Aristide précisera).
+- La base ne nécessite pas un nettoyage approfondi :
+  - il manque principalement une requête SQL permettant de réduire le nombre de points géographiques.
+- Points restant à traiter :
+  - numérotation des `idstamps`,
+  - gestion de la température de l’air et de la vitesse du vent :
+    - suppression de certaines colonnes,
+    - conversion du timestamp en `INTEGER`,
+    - conservation de la température externe.
+
+### Base des villes Wikidata — Marie
+- La requête SPARQL initiale étant trop lourde, il a été décidé de :
+  - diviser l’Espagne en provinces,
+  - récupérer ensuite les villes province par province,
+  - regrouper l’ensemble des fichiers CSV en un seul fichier.
+- Des villes sont encore manquantes, car Wikidata distingue villes et villages.
+  - Il faudra recommencer le processus en incluant également les villages.
+- Très peu de *highest points* sont recensés :
+  - faut-il supprimer cette donnée ?
+- Question sur la pertinence de conserver la colonne « pays ».
+- Le tableau contient actuellement :
+  - id Wikidata,
+  - nom de la ville,
+  - pays,
+  - coordonnées,
+  - latitude,
+  - longitude,
+  - élévation,
+  - aire géographique,
+  - population.
+- Il est proposé de modifier le nom de la colonne « population » pour y intégrer la date du recensement, afin d’éviter une colonne supplémentaire dédiée à cette date.
+
+### Base météo — Fanny (API AEMET)
+- Question sur la temporalité :
+  - conserve-t-on celle du départ ? Oui.
+- Il reste à créer un timestamp unique, car la multiplicité des heures et leur découpage :
+  - alourdissent la base,
+  - risquent d’introduire beaucoup de bruit.
+
+## 2. Rappel conceptuel : matrice et API
+
+Dans une API, une matrice regroupe un ensemble de points (coordonnées) qui, interprétés ensemble, permettent de définir une aire, le plus souvent modélisée sous la forme d’un polygone.
+
+## 3. Chaîne de traitement envisagée
+
+- Se renseigner sur l’API conseillée par Maxime Challon.
+- Créer un script Python produisant un CSV selon la logique suivante :
+  - dès qu’un oiseau entre dans le polygone créé à partir de la matrice fournie par l’API,
+  - cet oiseau est inclus dans le CSV.
+- Relier ensuite la base Wikidata uniquement aux villes concernées par ce CSV
+  - c’est-à-dire les villes effectivement bornées par le trajet des oiseaux.
+
+### Résumé du pipeline
+1. L’API crée le polygone des villes espagnoles pertinentes.
+2. Le trajet de l’oiseau est croisé avec la base Wikidata des villes.
+3. La base des villes est ainsi fortement réduite.
+4. La base Wikidata est ensuite reliée à la base météo.
+
+## 4. Environnement technique
+
+- Le script Python sera créé sur VS Code, à partir :
+  - de la documentation,
+  - et/ou de ChatGPT.
+- Le script sera lancé depuis le terminal.
+- La librairie Pandas est recommandée.
+
+### Nettoyage des CSV villes
+- Pas de script Python dédié : nous sommes également évalués sur les requêtes SQL, le nettoyage SQL est donc pertinent.
+- Le Python sera principalement utilisé pour la logique applicative.
+
+## 5. Modélisation de la base de données
+
+- À partir des 3 fichiers CSV nettoyés, DBeaver générera un modèle physique.
+- Date de rendu de la base : 8 février.
+- Chaque membre doit vérifier le modèle logique afin de s’assurer qu’il correspond aux plans de traitement.
+- Question ouverte : quelle sera la table centrale ?
+
+## 6. Datavisualisations attendues
+
+- 1 dataviz dynamique pour Flask :
+  - déplacement des faucons avec leurs points.
+- 3 dataviz statiques (à réaliser sur Tableau): lesquelles ?
+
+## 7. Organisation et communication
+
+- GitHub privé dédié :
+  - dépôt des morceaux de code,
+  - tests croisés,
+  - suivi du travail de chacun.
+- Drive :
+  - journal de bord,
+  - document récapitulant qui fait quoi.
+- Google Calc :
+  - liste des tâches,
+  - organisation chronologique jusqu’au rendu final.
+
+## 8. Outils complémentaires
+
+- QGIS :
+  - non intégré à l’application finale,
+  - mais outil précieux pendant le développement pour visualiser la localisation des oiseaux.
+
+## Prochaine deadline
+
+31 janvier : les 3 CSV doivent être propres et finalisés.
