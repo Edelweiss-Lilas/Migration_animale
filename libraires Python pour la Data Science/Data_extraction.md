@@ -39,7 +39,7 @@ méthode find : renverra un seul objet BeautifulSoup.
 existe aussi la méthode find_all
 
 # exemple utiliser pour ce sujet : 
-    #h1 télécharger des données météo à partir du site Web du National Weather Service (pas d'API):
+    télécharger des données météo à partir du site Web du National Weather Service (pas d'API):
 
 ## Extraire toutes les informations de la page 
 
