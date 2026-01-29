@@ -1,8 +1,8 @@
-#h1 Extraction de données web avec Python : automatisez vos collectes 
+# Extraction de données web avec Python : automatisez vos collectes 
 
 Si vous souhaitez capturer des données à partir de nombreux sites Web, vous devrez vous adonner au web scraping, lequel permet de faire face à des données non structurées que vous pourrez choisir de rapatrier en totalité ou préférer filtrer avant d'en télécharger une sélection.
 
-#h2 Comment fonctionne le web scraping en python ?
+## Comment fonctionne le web scraping en python ?
 
 Certains sites web proposent des ensembles de données téléchargeables au format CSV ou accessibles via une interface de programmation d'application (API)
 Une des possibilités : bibliothèque Beautiful Soup.
@@ -10,7 +10,7 @@ Pour analyser les données collecter : utiliser la bibliothèque Pandas
 Rédaction : écrire une requête au serveur qui héberge la page que nous avons spécifiée.
 règle générale : notre code télécharge le code source de cette page, tout comme le ferait un navigateur. Affichage : il filtre la page à la recherche des éléments HTML que nous avons spécifiés et en extrait le contenu que nous lui avons demandé d'extraire.
 
-#h2 Pourquoi utiliser Python pour le web scraping ?
+## Pourquoi utiliser Python pour le web scraping ?
 
 Possible de faire du web scraping avec de nombreu autres langages de programmation.
 - Beautiful Soup : l'une des approches les plus populaires du web scraping. 
@@ -19,7 +19,7 @@ Possible de faire du web scraping avec de nombreu autres langages de programmati
     * pensez à mettre en cache le contenu que vous récupérez afin qu'il ne soit téléchagé qu'une seule fois lorsque vous travaillez sur le code que vous utilisez pou le filtrer et l'analyser, plutôt que de le retélécharger chaque fois que vous exécuter votre code
     * envisagez de créer des pauses dans votre code en utilisant des fonctions telles que _time.sleep()_ pour éviter de surcharger les serveurs avec trop de requêtes dans un laps de temps trop court
 
-#h2 La bibliothèque requests
+## La bibliothèque requests
 
 La première chose à faire pour faire du web scraping sur une page Web est de la télécharger. Nous pouvons télécharger des pages en utilisant la bibliothèque requests. Cette dernière fera une requête _GET_ à un serveur qui téléchargera le contenu HTML d'une page Web donnée. 
 télécharger à l'aide de la méthode requests.get :
@@ -27,7 +27,7 @@ télécharger à l'aide de la méthode requests.get :
     page = requests.get(<<http:// dataquestio.github.io/web-scraping-pages/simple.html>>) page 
     <Réponse [200]>
 
-#h2 Analyse d'une page avec Beautiful Soup 
+## Analyse d'une page avec Beautiful Soup 
 
 cas d'une page HTML :
 possibilité d'utiliser la méthode prettify sur l'objet BeautifulSoup
@@ -38,10 +38,10 @@ rechercher toutes les instantces d'un tag : utiliser la méthode find_all, qui t
 méthode find : renverra un seul objet BeautifulSoup.
 existe aussi la méthode find_all
 
-#h1 exemple utiliser pour ce sujet : 
+# exemple utiliser pour ce sujet : 
     #h1 télécharger des données météo à partir du site Web du National Weather Service (pas d'API):
 
-#h2 Extraire toutes les informations de la page 
+## Extraire toutes les informations de la page 
 
 extraire le nom de l'élément de prévision, la brève description et la température, car ils sont tous similaires :
     period = tonight.find (class_= <<period-namee>>). get_text() 
