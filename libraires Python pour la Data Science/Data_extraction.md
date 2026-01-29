@@ -38,8 +38,7 @@ rechercher toutes les instantces d'un tag : utiliser la méthode find_all, qui t
 méthode find : renverra un seul objet BeautifulSoup.
 existe aussi la méthode find_all
 
-# exemple utiliser pour ce sujet : 
-    télécharger des données météo à partir du site Web du National Weather Service (pas d'API):
+# exemple utiliser pour ce sujet : télécharger des données météo à partir du site Web du National Weather Service (pas d'API):
 
 ## Extraire toutes les informations de la page 
 
