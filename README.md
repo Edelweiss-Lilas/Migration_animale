@@ -1,26 +1,86 @@
-# 🦅 Migration animale 🦅
+**Crédits : Maxime CHALLON // Adaptations : Lauryne LEMOSQUET**
 
-Le projet VOIE DE CRÉCERELLE cherche à déterminer et à mettre en valeur l’impact de l’activité humaine sur la migration d’un groupe de faucons crécerelles (Falco tinnunculus) en croisant des données animalières, géographiques et météorologiques.
+**Tout se passe (configuration, commandes dans le terminal) au sein de ce dossier dans lequel vous lisez ce fichier**
 
-Entre 2021 et 2023, la station biologique du parc national de Doñana (EDB) en Andalousie, en collaboration avec le Conseil supérieur de la recherche scientifique (CSIC), a équipé un échantillon de faucons crécerelles de balises GPS afin d’étudier leurs déplacements. Ce jeu de données sera croisé avec les relevés météorologiques issus de l'Agence d'État de météorologie espagnole (AEMET) ainsi qu’avec des données géographiques de Wikidata (espaces urbains, densité de population, reliefs…).
+**Le projet doit s’exécuter avec `python run.py` sans aucune modification du code fourni, seuls le fichier .env doit être modifié.**
 
-La base de données sera accessible via une interface web. Les données seront présentées sous la forme de données structurées et de datavisualisation afin de sensibiliser sur l’impact de l’homme sur l'éthologie de ces rapaces.
+## Préparation de l'environnement de travail pour le script
 
+### 1. Créer un environnement virtuel
 
-# L'équipe 👩🏻‍💻✍🏻💡
+A créer dans ce dossier, à côté du `README.md` et du `run.py`
 
-L'application a été créé par :
+Pour rappel: `virtualenv env -p python3` ou `python -m venv env`
 
-- Marie Vielmas 
-- Clara Martin
-- Fanny Suszko
-- Aristide Curtelin
-- Valeria Fiorentini
+### 2. Activer cet environnement
 
-# Deadlines 📓
+`source env/bin/activate` (ou `source env/Scripts/activate` pour Windows)
 
-|Date              | Livrable        | Type de rendu         |
-| :--------------- |:---------------:| --------:      |
-| 15/02/2026       | Livrable n°3    | traitement de données |
-| 01/03/2026       | Livrable n°4    | datavisualisation et journal de bord |
-| 31/03/2026       | Livrable n°5    | application python    |
+### 3. Importer les bonnes dépendances dans l'environnement
+
+`pip install -r requirements.txt`
+
+---
+
+## Étapes à suivre pour remplir la base
+
+### 1. Modifier le fichier `.env`
+Le fichier doit contenir toutes les variables suivantes :
+Le fichier est déjà pré remplie avec les informations de base mais vous devez y ajouter les informations d'utilisateur et de mot de passe de votre base de données PostgreSQL.
+
+```env
+pgDatabase=str
+pgUser=str
+pgPassword=str
+pgPort=int
+pgHost=str
+pgSchemaImportsCsv=str
+failOnFirstSqlError=bool
+failOnFirstCsvError=bool
+```
+
+- `pgDatabase` : nom de la base à créer/utiliser  pour importer les données et jouer les scripts. Cette base est unique pour l'ensemble du projet.
+- `pgUser` : utilisateur PostgreSQL avec lequel se connecter
+- `pgPassword` : mot de passe PostgreSQL correspondant à l'utilisateur
+- `pgHost` : adresse du serveur PostgreSQL
+- `pgPort` : port du serveur PostgreSQL  
+- `pgSchemaImportsCsv` : schéma où seront importés les CSV  sous forme de table (1 CSV = 1 table du nom du ficheir CSV)
+- `failOnFirstSqlError` : si `True`, le script s’arrête dès qu’une requête SQL échoue  
+- `failOnFirstCsvError` : si `True`, le script s’arrête dès qu’un import CSV dans la base de données échoue  
+
+### 2. Créer la base de données et le schéma
+Dans DBeaver, exécuter deux requêtes qui permettront de créer une base de données et un schéma dédié. Les informations que vous transmettez à SQL doivent correspondre aux éléments `pgDatabase` et `pgSchemaImportsCsv` du fichier .env.
+
+Créer une nouvelle base de données 
+```sql
+CREATE DATABASE {database_name} ;
+```
+
+Créer un nouveau schéma
+```sql
+CREATE SCHEMA {schema_name} ;
+```
+
+### 3. Lancer le script principal
+```bash
+python run.py
+```
+ou selon la configuration :
+```bash
+python3 run.py
+```
+
+---
+
+## Fonctionnement
+- Au lancement, le script :
+  1. Charge les variables du fichier `.env`.
+  2. Vérifie si la base `pgDatabase` existe, sinon la crée.
+  3. Importe tous les fichiers CSV du dossier `csv/` dans le schéma `pgSchemaImportsCsv`.
+  4. Exécute tous les fichiers SQL du dossier `sql/`.
+
+- Les logs affichent :
+  - la création de la base si nécessaire ;
+  - l’exécution des requêtes SQL ;
+  - l’import des fichiers CSV ;
+  - les erreurs éventuelles (selon les paramètres `failOnFirstSqlError` et `failOnFirstCsvError`, le script peut s'arrêter immédiatement).
