@@ -1,3 +1,11 @@
+# L'équipe 👩🏻‍💻✍🏻💡
+
+L'application a été créée par :
+- Marie Vielmas
+- Clara Martin
+- Fanny Suszko
+- Aristide Curtelin
+
 # Deadlines 📓
 
 |Date              | Livrable        | Type de rendu         |
