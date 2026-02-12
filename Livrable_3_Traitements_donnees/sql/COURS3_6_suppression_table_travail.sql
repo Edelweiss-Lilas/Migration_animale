@@ -37,7 +37,11 @@ DROP TABLE meteo_palencia;
 DROP TABLE meteo_san_roque;
 DROP TABLE meteo_tarifa;
 DROP TABLE meteo_villarasa;
-
+DROP TABLE tarifa;
+DROP TABLE communes_global;
+DROP TABLE espacesvert_complet;
+DROP TABLE meteo_jerez_de_las_fronteras;
+DROP TABLE meteo_faucons_complete;
 
 -- drop table  travail WEATHER MEASUREMENT 
 
