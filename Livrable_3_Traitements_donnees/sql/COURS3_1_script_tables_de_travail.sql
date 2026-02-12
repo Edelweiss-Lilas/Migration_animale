@@ -172,8 +172,8 @@ WHERE ctid NOT IN (
 
 
 -- Création de la table space_complet avec une jointure UNION ALL
-DROP TABLE IF EXISTS space_complet;
-CREATE TABLE space_complet AS
+DROP TABLE IF EXISTS place;
+CREATE TABLE place AS
 SELECT
    space_label,
    wikidata_id,
