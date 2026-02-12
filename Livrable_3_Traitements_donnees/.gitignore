@@ -3,4 +3,6 @@ data/
 env/
 venv/
 *.sql
+
 *.csv
+.gitattributes
