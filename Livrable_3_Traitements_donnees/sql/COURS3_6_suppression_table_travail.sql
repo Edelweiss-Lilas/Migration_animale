@@ -17,7 +17,7 @@ DROP TABLE selected_falcons;
 DROP TABLE falcon_positions_30_downsampled;
 
 -- 7. SUPPRESSION DES TABLES BRUTES
-DROP TABLE _ebd;
+DROP TABLE "KESTREL34";
 
 -- drop table travail BIRD DETECTION 
 
@@ -44,4 +44,4 @@ DROP TABLE meteo_villarasa;
 -- Marque la fin du script
 COMMIT ;
 
--- La base de données est désormais terminée ! Suite logique : création des vues pour leur exploitation par TABLEAU
+

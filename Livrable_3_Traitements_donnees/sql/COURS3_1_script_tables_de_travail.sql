@@ -36,16 +36,15 @@ SET
    ccaa_label = INITCAP(TRIM(ccaa_label)),
    province_label = INITCAP(TRIM(province_label)),
    coordonnees = NULLIF(TRIM(coordonnees), ''),
-   elevation = NULLIF(elevation, 0),      
-   area = NULLIF(area, 0),               
+   elevation = NULLIF(elevation, 0),     
    population = NULLIF(population, 0);
 
 -- Conversion type de données
 ALTER TABLE communes_global
-ALTER COLUMN elevation TYPE NUMERIC(7, 3)
-   USING elevation::NUMERIC(7, 3),
-ALTER COLUMN area TYPE NUMERIC(10, 6)
-   USING area::NUMERIC(10, 6),
+ALTER COLUMN elevation TYPE NUMERIC
+   USING elevation::NUMERIC,
+ALTER COLUMN superficie TYPE NUMERIC
+   USING superficie::NUMERIC,
 ALTER COLUMN population TYPE INTEGER
    USING population::INTEGER;
 
@@ -92,14 +91,14 @@ WHERE ctid NOT IN (
 
 -- Identifier les space_label qui prennent la forme d’un wikidata_id 
 delete from communes_global cg
-where "wikidataID" = 'Q113502358';
+where "wikidata_id" = 'Q113502358';
 
 -- Insérer les métdonnées de Ceuta et Melilla
-insert  into communes_global (space_label,wikidata_id, type_label, ccaa_label,  province_label,coordonnees, elevation , area, population)
-values ('Melilla','Q5831','City', 'NULL', 'NULL', 'Point(-2.9475 35.2825)','30','12.3338','86780');
+insert  into communes_global (space_label,wikidata_id, type_label, ccaa_label,  province_label,coordonnees, elevation , superficie, population)
+values ('Melilla','Q5831','City', NULL, NULL, 'Point(-2.9475 35.2825)',30,12.3338,86780);
 
-insert  into communes_global (space_label,wikidata_id, type_label, ccaa_label,  province_label,coordonnees, elevation , area, population)
-values ('Ceuta','Q5823','City', 'NULL', 'NULL', 'Point(-5.3 35.886667)','10','18.5','83595');
+insert  into communes_global (space_label,wikidata_id, type_label, ccaa_label,  province_label,coordonnees, elevation , superficie, population)
+values ('Ceuta','Q5823','City', NULL, NULL, 'Point(-5.3 35.886667)',10,18.5,83595);
 
 -- Natural spaces
 
@@ -120,7 +119,7 @@ SET
    wikidata_id = TRIM(wikidata_id),
    type_label = INITCAP(TRIM(type_label)),
    ccaa_label = INITCAP(TRIM(ccaa_label)),
-   province_label = INITCAP(nullif(TRIM(province_label), '')), #ajout d’un nullif car certaines données sur les provinces sont manquantes
+   province_label = INITCAP(nullif(TRIM(province_label), '')), --ajout d’un nullif car certaines données sur les provinces sont manquantes
    coordonnees = NULLIF(TRIM(coordonnees), ''),
    area = NULLIF(area, 0);    
 
@@ -173,6 +172,7 @@ WHERE ctid NOT IN (
 
 
 -- Création de la table space_complet avec une jointure UNION ALL
+DROP TABLE IF EXISTS space_complet;
 CREATE TABLE space_complet AS
 SELECT
    space_label,
@@ -182,7 +182,7 @@ SELECT
    province_label,
    coordonnees,
    elevation,
-   area,
+   superficie as area,
    population
 FROM communes_global
 UNION ALL
@@ -193,9 +193,9 @@ SELECT
    ccaa_label,
    province_label,
    coordonnees,
-   NULL::NUMERIC(7,3) AS elevation, #colonne qui n’existe pas dans espacesvert
+   NULL::NUMERIC(7,3) AS elevation, --colonne qui n’existe pas dans espacesvert
    area,
-   NULL::INTEGER AS population #colonne qui n’existe pas dans espacesvert
+   NULL::INTEGER AS population --colonne qui n’existe pas dans espacesvert
 FROM espacesvert_complet;
 
 
@@ -254,7 +254,7 @@ SELECT
 
   NULLIF(BTRIM("tag-local-identifier"::text), ''),
   NULLIF(BTRIM("individual-local-identifier"::text), '')
-FROM public._ebd
+FROM "KESTREL34"
 WHERE NULLIF(BTRIM("individual-local-identifier"::text), '') IS NOT NULL;
 
 
