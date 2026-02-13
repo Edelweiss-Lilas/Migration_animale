@@ -141,13 +141,22 @@ class DataLoader:
                 file_path = os.path.join(csv_path, csv_file)
                 logger.info(f"Import du fichier CSV : {csv_file}")
 
-                with open(file_path, "r", encoding="utf-8") as f:
+                with open(file_path, "r", encoding="utf-8-sig") as f:
                     sample = f.read(4096)
                     f.seek(0)
 
                     sniffer = csv.Sniffer()
-                    dialect = sniffer.sniff(sample)
+                    try:
+                        dialect = sniffer.sniff(sample, delimiters=',;')
+                    except csv.Error:
+                        dialect = sniffer.sniff(sample)
                     has_header = sniffer.has_header(sample)
+                    # Correction manuelle pour le fichier des communes
+                    if csv_file == "communes_global.csv":
+                        dialect.delimiter = ","
+                        has_header = True
+                    else:
+                        has_header = sniffer.has_header(sample)
 
                     logger.info("Propriétés CSV détectées : delimiter={delimiter}, quotechar={quotechar}, escapechar={escapechar}, doublequote={doublequote}, skipinitialspace={skipinitialspace}".format(
                             delimiter = dialect.delimiter,
@@ -157,17 +166,18 @@ class DataLoader:
                             skipinitialspace = dialect.skipinitialspace
                         )
                     )
-
+                    f.seek(0) 
                     df = pd.read_csv(
                         f,
                         sep=dialect.delimiter,
                         quotechar=dialect.quotechar,
                         escapechar=dialect.escapechar,
                         doublequote=dialect.doublequote,
-                        skipinitialspace=dialect.skipinitialspace,
-                        header=0 if has_header else None
+                        skipinitialspace=True,
+                        header=0 if has_header else None,
+                        on_bad_lines='skip' 
                     )
-
+                    logger.info(f"Nombre de lignes lues : {len(df)} dans {csv_file}")
                     try:
                         logger.info("Début du transfert vers la base de données et la table " + os.environ.get("pgSchemaImportsCsv"))
                         df.to_sql(
@@ -201,6 +211,9 @@ if __name__ == "__main__":
         engine = processingPostgres.get_engine()
 
         if engine:
+            with engine.connect() as connection:
+                connection.execute(text("CREATE SCHEMA IF NOT EXISTS crec"))
+                connection.commit()
             loader = DataLoader(engine)
             loader.load_csv_files("csv")
             loader.load_sql_files("sql")

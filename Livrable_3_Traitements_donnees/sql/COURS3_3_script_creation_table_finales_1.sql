@@ -7,10 +7,50 @@ SET search_path TO CREC;
 
 -- CREATION et nettoyage PLACE finale
 
+-- rajout d'une colonne place_id pour se conformer au modèle logique 
+alter table space_complet
+add column place_id INTEGER;
 
+-- création de la table finale PLACE (créer les colonnes avec leurs intitulés) + création d'une clé primaire qui se remplit automatiquement en auto-incrémentation
+DROP TABLE IF EXISTS place CASCADE;
+create table place (
+place_id INTEGER generated always as identity primary key, 
+space_label VARCHAR(255),
+wikidata_id VARCHAR(255),
+type_label VARCHAR(255),
+ccaa_label VARCHAR(255),
+province_label VARCHAR(255),
+coordonnees VARCHAR(255),
+elevation NUMERIC(7,3),
+area NUMERIC, 
+population INTEGER
+);
+
+-- insertion des données issues de space_complet dans la table finale PLACE
+insert into place (
+space_label,
+wikidata_id, 
+type_label, 
+ccaa_label, 
+province_label, 
+coordonnees, 
+elevation,  
+area, 
+population)
+select 
+space_label,
+wikidata_id, 
+type_label, 
+ccaa_label, 
+province_label, 
+coordonnees, 
+elevation,  
+area, 
+population
+from space_complet ;
 -- CREATION et nettoyage FALCON finale
 -- 4. TABLE FINALE : FALCON
-
+DROP TABLE IF EXISTS falcon CASCADE;
 CREATE TABLE falcon (
   falcon_id SERIAL PRIMARY KEY,
   falcon_code TEXT UNIQUE NOT NULL,
@@ -33,7 +73,7 @@ FROM selected_falcons s;
 
 
 -- 5. TABLE FINALE : BIRD_DETECTION
-
+DROP TABLE IF EXISTS bird_detection CASCADE;
 CREATE TABLE bird_detection (
   detection_id SERIAL PRIMARY KEY,
   time TIMESTAMP,
@@ -41,8 +81,11 @@ CREATE TABLE bird_detection (
   speed DOUBLE PRECISION,
   altitude DOUBLE PRECISION,
   falcon_id INT NOT NULL,
+  place_id INT,
   CONSTRAINT fk_bird_detection_falcon
-    FOREIGN KEY (falcon_id) REFERENCES falcon(falcon_id)
+    FOREIGN KEY (falcon_id) REFERENCES falcon(falcon_id),
+  CONSTRAINT fk_bird_detection_place
+    FOREIGN KEY (place_id) REFERENCES place(place_id)
 );
 
 INSERT INTO bird_detection (
@@ -70,12 +113,15 @@ WHERE p.latitude IS NOT NULL
 
 -- CREATION et nettoyage WEATHER STATION finale
 -- 2. TABLE FINALE : WEATHER_STATION (référentiel)
+DROP TABLE IF EXISTS weather_station CASCADE;
 CREATE TABLE weather_station (
   station_id   BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   station_code TEXT NOT NULL UNIQUE,
   name         TEXT,
   province     TEXT,
-  place_id     INT                   -- NULL tant que PLACE n'est pas implémenté
+  place_id     INT,
+    CONSTRAINT fk_weather_station_place
+    FOREIGN KEY (place_id) REFERENCES place(place_id)                   -- NULL tant que PLACE n'est pas implémenté
 );
 
 INSERT INTO weather_station (station_code, name, province, place_id)
@@ -97,6 +143,7 @@ ON weather_station (station_code);
 
 
 -- 3. TABLE FINALE : WEATHER_MEASUREMENT
+DROP TABLE IF EXISTS weather_measurement CASCADE;
 CREATE TABLE weather_measurement (
   measurement_id   BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 

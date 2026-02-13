@@ -7,7 +7,6 @@ SET search_path TO CREC;
 
 -- Mise à jour des foreign keys 
 
-
 -- update Bird detection / place id + falcon id 
 
 

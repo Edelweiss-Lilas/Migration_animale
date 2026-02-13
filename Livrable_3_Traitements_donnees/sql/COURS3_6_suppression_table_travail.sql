@@ -8,6 +8,9 @@ SET search_path TO CREC;
 
 --  
 -- drop table travail PLACE 
+DROP TABLE city;
+DROP TABLE espacesvert;
+DROP TABLE space_complet;
 
 
 -- drop table travail FALCON 

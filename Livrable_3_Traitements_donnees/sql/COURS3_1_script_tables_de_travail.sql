@@ -8,27 +8,91 @@ SET search_path TO CREC;
 
 -- City
 
--- suppression des colonnes non souhaitées dans city
-ALTER TABLE communes_global
+-- import du csv brut communes_global dans dbeaver
+DROP TABLE IF EXISTS city CASCADE;
+CREATE TABLE city (
+  commune VARCHAR,
+  city_label VARCHAR,
+  wikidata_id VARCHAR,
+  type_label VARCHAR,
+  continent VARCHAR,
+  continentlabel VARCHAR,
+  pays VARCHAR,
+  payslabel VARCHAR,
+  communauteautonome VARCHAR,
+  province_label VARCHAR,
+  coordonnees VARCHAR,
+  latitude FLOAT,
+  longitude FLOAT,
+  elevation INTEGER,
+  pointculminant VARCHAR,
+  pointculminantlabel VARCHAR,
+  superficie FLOAT,
+  population INTEGER
+);
+
+INSERT INTO city (
+commune,
+city_label,
+wikidata_id,
+type_label,
+continent,
+continentlabel,
+pays,
+payslabel,
+communauteautonome,
+province_label,
+coordonnees,
+latitude,
+longitude,
+elevation,
+pointculminant,
+pointculminantlabel,
+superficie,
+population)
+SELECT
+commune,
+city_label,
+wikidata_id,
+type_label,
+continent,
+"contientLabel",
+pays,
+"paysLabel",
+"communauteAutonome",
+province_label,
+coordonnees,
+latitude,
+longitude,
+elevation,
+"pointCulminant",
+"pointCulminantLabel",
+superficie,
+population
+from crec.communes_global;
+
+
+--suppression des colonnes non souhaitées dans city
+ALTER TABLE city
  DROP COLUMN commune,
  DROP COLUMN  continent,
- DROP COLUMN "contientLabel",
+ DROP COLUMN continentlabel,
  DROP COLUMN  pays,
- DROP COLUMN  "paysLabel",
-DROP COLUMN latitude,
-DROP COLUMN longitude,
- DROP COLUMN  "pointCulminant",
- DROP COLUMN "pointCulminantLabel";
+ DROP COLUMN  paysLabel,
+ DROP COLUMN latitude,
+ DROP COLUMN longitude,
+ DROP COLUMN  pointCulminant,
+ DROP COLUMN pointCulminantLabel;
 
 -- Renommer les colonnes
-ALTER TABLE communes_global
-RENAME COLUMN "communauteAutonome" TO ccaa_label;
+ALTER TABLE city
+RENAME COLUMN communauteautonome TO ccaa_label;
 
-ALTER TABLE communes_global
+ALTER TABLE city
 RENAME COLUMN  city_label to space_label;
 
--- Traitement données
-UPDATE communes_global
+-- Traitement des données
+UPDATE city
 SET
    space_label = INITCAP(TRIM(space_label)),
    wikidata_id = TRIM(wikidata_id),
@@ -40,7 +104,7 @@ SET
    population = NULLIF(population, 0);
 
 -- Conversion type de données
-ALTER TABLE communes_global
+ALTER TABLE city
 ALTER COLUMN elevation TYPE NUMERIC
    USING elevation::NUMERIC,
 ALTER COLUMN superficie TYPE NUMERIC
@@ -48,8 +112,8 @@ ALTER COLUMN superficie TYPE NUMERIC
 ALTER COLUMN population TYPE INTEGER
    USING population::INTEGER;
 
--- Enlever les accents et signes spécifiques
-UPDATE communes_global
+--Enlever les accents et signes spécifiques
+UPDATE city
 SET
    space_label = REGEXP_REPLACE(
        REPLACE(
@@ -83,37 +147,76 @@ SET
    );
 
 -- Gérer les doublons et faux-doublons
-DELETE FROM communes_global
+DELETE FROM city
 WHERE ctid NOT IN (
    SELECT MIN(ctid)
-   FROM communes_global
+   FROM city
    GROUP BY coordonnees);
 
 -- Identifier les space_label qui prennent la forme d’un wikidata_id 
-delete from communes_global cg
+delete from city cg
 where "wikidata_id" = 'Q113502358';
 
 -- Insérer les métdonnées de Ceuta et Melilla
-insert  into communes_global (space_label,wikidata_id, type_label, ccaa_label,  province_label,coordonnees, elevation , superficie, population)
-values ('Melilla','Q5831','City', NULL, NULL, 'Point(-2.9475 35.2825)',30,12.3338,86780);
+insert  into city (space_label,wikidata_id, type_label, ccaa_label,  province_label,coordonnees, elevation , superficie, population)
+values ('Melilla','Q5831','City', 'NULL', 'NULL', 'Point(-2.9475 35.2825)','30','12.3338','86780');
 
-insert  into communes_global (space_label,wikidata_id, type_label, ccaa_label,  province_label,coordonnees, elevation , superficie, population)
-values ('Ceuta','Q5823','City', NULL, NULL, 'Point(-5.3 35.886667)',10,18.5,83595);
+insert  into city (space_label,wikidata_id, type_label, ccaa_label,  province_label,coordonnees, elevation , superficie, population)
+values ('Ceuta','Q5823','City', 'NULL', 'NULL', 'Point(-5.3 35.886667)','10','18.5','83595');
 
--- Natural spaces
 
--- suppression des colonnes non souhaitées dans natural spaces
-alter table espacesvert_complet
+--Natural spaces
+-- import du csv brut espacesvert_complet dans dbeaver
+DROP TABLE IF EXISTS espacesvert CASCADE;
+CREATE TABLE espacesvert (
+  espace VARCHAR,
+  space_label VARCHAR,
+  wikidata_id VARCHAR,
+  type_label VARCHAR,
+  communaute_label VARCHAR,
+  province_label VARCHAR,
+  coordonnees VARCHAR,
+  area FLOAT,
+  visiteurs INTEGER,
+  climatlabel VARCHAR
+);
+
+INSERT INTO espacesvert (
+espace,
+space_label,
+wikidata_id,
+type_label,
+communaute_label,
+province_label,
+coordonnees,
+area,
+visiteurs,
+climatlabel)
+SELECT
+espace,
+space_label,
+wikidata_id,
+type_label,
+communaute_label,
+province_label,
+coordonnees,
+area,
+visiteurs,
+"climatLabel"
+from espacesvert_complet;
+
+--suppression des colonnes non souhaitées dans natural spaces
+alter table  espacesvert
 drop column espace,
 drop column visiteurs,
-drop column "climatLabel";
+drop column climatlabel;
 
--- Renommer les colonnes
-ALTER TABLE espacesvert_complet
+--Renommer les colonnes
+ALTER TABLE  espacesvert
 RENAME COLUMN communaute_label TO ccaa_label;
 
 -- Traitement données
-UPDATE espacesvert_complet
+UPDATE espacesvert
 SET
    space_label = INITCAP(TRIM(space_label)),
    wikidata_id = TRIM(wikidata_id),
@@ -124,12 +227,12 @@ SET
    area = NULLIF(area, 0);    
 
 -- Conversion type de données
-ALTER TABLE espacesvert_complet
+ALTER TABLE  espacesvert
 ALTER COLUMN area TYPE NUMERIC(10, 2)
    USING area::NUMERIC(10, 2);
 
 -- Enlever les accents et signes spécifiques
-UPDATE espacesvert_complet ec
+UPDATE espacesvert ec
 SET
    space_label = REGEXP_REPLACE(
        REPLACE(
@@ -163,17 +266,16 @@ SET
    );
 
 -- Gérer les doublons et faux doublons
-DELETE FROM espacesvert_complet
+DELETE FROM  espacesvert
 WHERE ctid NOT IN (
   SELECT MIN(ctid)
-  FROM espacesvert_complet ec
+  FROM  espacesvert ec
   GROUP BY area);
 
 
-
 -- Création de la table space_complet avec une jointure UNION ALL
-DROP TABLE IF EXISTS place;
-CREATE TABLE place AS
+DROP TABLE IF EXISTS space_complet CASCADE;
+CREATE TABLE space_complet AS
 SELECT
    space_label,
    wikidata_id,
@@ -184,7 +286,7 @@ SELECT
    elevation,
    superficie as area,
    population
-FROM communes_global
+FROM city
 UNION ALL
 SELECT
    space_label,
@@ -196,7 +298,7 @@ SELECT
    NULL::NUMERIC(7,3) AS elevation, --colonne qui n’existe pas dans espacesvert
    area,
    NULL::INTEGER AS population --colonne qui n’existe pas dans espacesvert
-FROM espacesvert_complet;
+FROM espacesvert;
 
 
 -- CREATION et nettoyage FALCON 
