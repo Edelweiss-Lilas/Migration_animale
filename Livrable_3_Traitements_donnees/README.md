@@ -129,6 +129,27 @@ Le rattachement géographique des détections repose sur :
 Les détections trop éloignées ne sont pas supprimées mais conservées sans rattachement afin de préserver la cohérence spatiale des analyses.
 
 ---
+## Clonage du github
+
+---
+### 1. Cloner le dépôt
+
+```bash
+git clone git@github.com:Edelweiss-Lilas/Migration_animale.git
+```
+###2. Activer git lfs
+Pour parvenir à télécharger nécessaire d'installer au préalable la dépendance git lfs à la racine du repository c'est-à-dire à Migration_animale
+```bash
+sudo apt-get install git-lfs
+```
+```bash
+git lfs install
+```
+###3. Téléchargement des csv
+```bash
+git lfs pull 
+```
+---
 
 ## Installation et exécution
 
