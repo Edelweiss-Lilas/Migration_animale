@@ -5,11 +5,6 @@
 --  - Les vues reposent UNIQUEMENT sur les tables finales :
 --      place, falcon, bird_detection, weather_station, weather_measurement
 --  - Fournir des datasets déjà agrégés (COUNT / AVG / GROUP BY) pour la dataviz
---
--- Prérequis :
---  - script 01 exécuté (staging)
---  - script 02 exécuté (tables finales)
---  - script 03 exécuté (place_id enrichis au moins partiellement)
 -- ============================================================
 
 BEGIN;
@@ -100,7 +95,7 @@ GROUP BY
   EXTRACT(YEAR FROM bd.time)
 ORDER BY
   year,
-  nb_detections DESC;                      -- on affiche d’abord les provinces les plus "actives"
+  nb_detections DESC;                      -- on affiche d’abord les provinces les plus actives
 
 -- ============================================================
 -- DATAVIZ 2 : v_dataviz2_migration_vs_meteo_province_month
@@ -128,10 +123,10 @@ falcon_by_province_month AS (
     p.province_label AS province,
 
     -- month_start = début du mois (format date)
-    -- très pratique pour joindre avec météo et pour les axes temporels Tableau
+    -- pour joindre avec météo et pour les axes temporels Tableau
     DATE_TRUNC('month', bd.time) AS month_start,
 
-    -- on garde aussi year et month séparés pour des filtres / labels simples
+    -- on garde aussi year et month séparés pour des filtres et labels simples
     EXTRACT(YEAR FROM bd.time) AS year,
     EXTRACT(MONTH FROM bd.time) AS month,
 
@@ -156,7 +151,7 @@ falcon_by_province_month AS (
 -- On part des mesures météo (weather_measurement)
 -- On remonte à la station (weather_station)
 -- Puis au lieu (place) via ws.place_id
--- => on récupère la province "standardisée" depuis place.province_label
+-- on récupère la province "standardisée" depuis place.province_label
 meteo_by_province_month AS (
   SELECT
     p.province_label AS province,
@@ -171,7 +166,7 @@ meteo_by_province_month AS (
   JOIN weather_station ws
     ON ws.station_id = wm.station_id
   JOIN place p
-    ON p.place_id = ws.place_id  -- IMPORTANT : nécessite que ws.place_id soit rempli (script 03)
+    ON p.place_id = ws.place_id
   GROUP BY
     p.province_label,
     DATE_TRUNC('month', wm.time)
@@ -262,7 +257,7 @@ ORDER BY nb_detections DESC;
 --      * falcon_id
 --      * place_id (si rattaché)
 --
--- Très pratique pour :
+-- Utile pour :
 --  - une map (nuage de points)
 --  - des filtres par mois/année/faucon
 

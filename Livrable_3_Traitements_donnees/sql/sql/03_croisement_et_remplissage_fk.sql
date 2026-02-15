@@ -1,5 +1,5 @@
 -- ============================================================
--- 03_enrichissement_fk.sql (FINAL : PATCH 5960 + MASPALOMAS + SEUIL EFFECTIF)
+-- 03_enrichissement_fk.sql (FINAL : PATCH 5960 + MASPALOMAS)
 -- Objectif :
 --  - Enrichir / remplir des clés étrangères (FK) après création des tables finales
 --  - Remplir weather_station.place_id (matching par nom + patches)
@@ -27,7 +27,7 @@ SET search_path TO CREC, public;
 -- ============================================================
 -- Problème :
 --  - place.coordonnees est un TEXTE "Point(lon lat)"
---  - pour calculer une distance, on a besoin de colonnes numériques lat/lon
+--  - MAIS pour calculer une distance, on a besoin de colonnes numériques lat/lon
 --
 -- Solution :
 --  - on ajoute 2 colonnes si elles n'existent pas
@@ -89,7 +89,7 @@ WHERE ws.place_id IS NULL
   AND (p.type_label ILIKE 'city%' OR p.type_label IS NULL)
   AND upper(unaccent(btrim(ws.name))) LIKE upper(unaccent(btrim(p.space_label))) || '%';
 
--- C) Patch spécifique Maspalomas :
+-- C) Patch spécifique MASPALOMAS :
 -- On sait exactement quelle station_code correspond à Maspalomas
 -- Donc on force le lien via l'id Wikidata (fiable)
 UPDATE weather_station ws
@@ -148,7 +148,7 @@ WHERE bd.place_id = p.place_id
 --
 -- Important :
 --  - JOIN LATERAL permet de faire une "mini requête" place par place
---    pour trouver le meilleur lieu (le plus proche) pour une détection donnée.
+--    pour trouver le meilleur lieu (le plus proche) pour une détection donnée
 
 WITH nearest_place AS (
   SELECT
@@ -199,7 +199,6 @@ WHERE bd.detection_id = n.detection_id;
 -- ============================================================
 -- 4) Vérifications
 -- ============================================================
--- But : donner un petit "rapport" de couverture après enrichissement
 
 -- Couverture stations météo : combien ont un place_id ?
 SELECT

@@ -1,5 +1,5 @@
 -- ============================================================
--- 01_staging_et_nettoyage.sql (FINAL STABLE / COMPLET)
+-- 01_staging_et_nettoyage.sql
 -- Objectif :
 --  - Préparer des "tables de travail" propres (staging)
 --  - Nettoyer les textes (trim, accents, caractères spéciaux)
@@ -7,11 +7,6 @@
 --  - Filtrer les outliers côté faucons
 --  - Fusionner villes + espaces verts dans une table unique
 --  - Préparer une météo propre dans une table unique
---
--- Important :
---  - Les tables brutes (CSV importés) existent déjà dans CREC :
---      communes_global, espacesvert_complet, kestrel34,
---      meteo_almonte, meteo_ceuta, ... meteo_villarasa
 -- ============================================================
 
 -- Active l'extension unaccent (permet de comparer "Séville" et "Seville")
@@ -27,9 +22,26 @@ CREATE SCHEMA IF NOT EXISTS CREC;
 SET search_path TO CREC, public;
 
 -- ============================================================
+-- PATCH : rendre la table brute kestrel34 insensible à la casse
+-- Si le CSV s'appelle KESTREL34.csv, Pandas crée une table "KESTREL34", 
+-- on renomme/normalise toujours vers "kestrel34"
+-- ============================================================
+
+DO $$
+BEGIN
+  IF to_regclass('crec.kestrel34') IS NULL THEN
+    IF to_regclass('crec."KESTREL34"') IS NOT NULL THEN
+      EXECUTE 'ALTER TABLE crec."KESTREL34" RENAME TO kestrel34';
+    ELSIF to_regclass('crec."Kestrel34"') IS NOT NULL THEN
+      EXECUTE 'ALTER TABLE crec."Kestrel34" RENAME TO kestrel34';
+    END IF;
+  END IF;
+END $$;
+
+-- ============================================================
 -- ===================== PLACE (STAGING) ======================
 -- ============================================================
--- Ici : on prépare les lieux (villes + espaces verts)
+-- On prépare les lieux (villes + espaces verts)
 -- On nettoie, puis on fusionne dans une table unique : space_complet
 -- Cette table servira au script 02 pour créer la table finale PLACE
 
@@ -90,7 +102,7 @@ SELECT
   wikidata_id,
   type_label,
   continent,
-  "contientLabel",         -- colonne brute avec un nom un peu "bizarre"
+  "contientLabel",         -- colonne brute
   pays,
   "paysLabel",
   "communauteAutonome",
@@ -106,7 +118,7 @@ SELECT
 FROM communes_global;
 
 -- Suppression des colonnes qu'on ne veut pas garder dans city
--- But : alléger le modèle et ne garder que ce qui sert
+-- pour alléger le modèle et ne garder que ce qui sert
 ALTER TABLE city
   DROP COLUMN commune,
   DROP COLUMN continent,
@@ -149,7 +161,7 @@ ALTER TABLE city
   ALTER COLUMN population  TYPE INTEGER USING population::INTEGER;
 
 -- Normalisation des textes : suppression accents + caractères spéciaux
--- But : éviter les faux doublons ("Ávila" vs "Avila"), faciliter les jointures
+-- pour éviter les faux doublons ("Ávila" vs "Avila") et faciliter les jointures
 UPDATE city
 SET
   space_label = REGEXP_REPLACE(
@@ -179,7 +191,7 @@ DELETE FROM city
 WHERE wikidata_id = 'Q113502358';
 
 -- Patch manuel : ajout de 3 lieux pour pouvoir matcher les stations météo
--- (garantit que les stations comme Ceuta/Melilla/Maspalomas auront un place_id ensuite)
+-- (les stations comme Ceuta/Melilla/Maspalomas auront un place_id ensuite)
 INSERT INTO city (space_label, wikidata_id, type_label, ccaa_label, province_label, coordonnees, elevation, superficie, population)
 VALUES
   ('Melilla','Q5831','City', NULL, NULL, 'Point(-2.9475 35.2825)', 30, 12.3338, 86780),
@@ -190,7 +202,7 @@ VALUES
 -- 2) ESPACES VERTS (staging)
 -- ----------------------------
 
--- On recrée la table staging à chaque exécution (relançable)
+-- On recrée la table staging à chaque exécution
 DROP TABLE IF EXISTS espacesvert CASCADE;
 
 -- Table de travail pour les espaces verts (parcs, réserves, etc.)
@@ -274,8 +286,7 @@ SET
     '[^a-zA-Z0-9\s]', '', 'g'
   );
 
--- Gestion doublons selon TA règle : même area -> on garde 1 ligne
--- (note : c'est simple, mais deux parcs différents peuvent partager la même surface)
+-- Gestion doublons : même area, on garde 1 ligne
 DELETE FROM espacesvert
 WHERE ctid NOT IN (
   SELECT MIN(ctid)
@@ -291,7 +302,7 @@ WHERE ctid NOT IN (
 -- Elle servira à charger la table finale PLACE dans le script 02
 DROP TABLE IF EXISTS space_complet CASCADE;
 
--- UNION ALL = on concatène (plus rapide que UNION, et ne supprime pas automatiquement)
+-- UNION ALL = on concatène
 CREATE TABLE space_complet AS
 SELECT
   space_label,
@@ -383,7 +394,7 @@ FROM kestrel34
 WHERE NULLIF(BTRIM("individual-local-identifier"::text), '') IS NOT NULL;
 
 -- Sélection des 30 faucons avec le plus de points (hors outliers)
--- But : limiter le dataset pour un projet scolaire + garder de la qualité
+-- pour limiter le dataset et garder de la qualité
 CREATE TABLE selected_falcons AS
 SELECT individual_local_identifier
 FROM falcon_positions_clean
@@ -393,7 +404,7 @@ ORDER BY COUNT(*) DESC
 LIMIT 30;
 
 -- Downsampling : 1 point / 10 minutes / individu
--- But : réduire le volume, garder une trajectoire lisible
+-- pour réduire le volume tout en gardant une trajectoire lisible
 -- (p.ts_epoch / 600) crée un "bucket" de 10 minutes
 CREATE TABLE falcon_positions_30_downsampled AS
 WITH ranked AS (
@@ -422,7 +433,7 @@ WHERE rn = 1;
 DROP TABLE IF EXISTS weather_daily_work CASCADE;
 
 -- Table de travail météo "propre"
--- But : avoir 1 seul format, mêmes noms de colonnes, mêmes types
+-- pour avoir 1 seul format, mêmes noms de colonnes, mêmes types
 CREATE TABLE weather_daily_work (
   station_code   TEXT,
   station_name   TEXT,
@@ -447,7 +458,7 @@ CREATE TABLE weather_daily_work (
 -- Nettoyage :
 -- - TRIM
 -- - conversion en types numériques
--- - précip : Ip / TR / T = trace -> 0.0 (choix de projet)
+-- - précip : Ip / TR / T = trace -> 0.0
 INSERT INTO weather_daily_work (
   station_code, station_name, province, obs_date,
   tmin, tmed, tmax,
@@ -559,4 +570,4 @@ FROM meteo_villarasa;
 CREATE INDEX ix_weather_work_station_date
 ON weather_daily_work (station_code, obs_date);
 
-COMMIT; -- Fin transaction
+COMMIT; -- Fin

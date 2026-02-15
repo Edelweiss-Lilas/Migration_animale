@@ -1,13 +1,12 @@
 -- ============================================================
 -- 02_tables_finales.sql
 -- Objectif :
---  - Créer les tables finales "propres" :
---      PLACE, FALCON, BIRD_DETECTION, WEATHER_STATION, WEATHER_MEASUREMENT
---  - Mettre les PK (clés primaires) et FK (clés étrangères)
+--  - Créer les tables finales "propres" : PLACE, FALCON, BIRD_DETECTION, WEATHER_STATION, WEATHER_MEASUREMENT
+--  - Mettre les PK et FK
 --  - Charger les données depuis les tables de staging (script 01)
 --
 -- Important :
---  - On NE remplit PAS place_id dans bird_detection ici.
+--  - On NE remplit pas place_id dans bird_detection ici.
 --    Le rattachement géographique (nearest place) se fait dans le script 03.
 -- Prérequis :
 --  - space_complet, selected_falcons, falcon_positions_30_downsampled, weather_daily_work existent
@@ -24,11 +23,11 @@ SET search_path TO CREC;
 --   - bird_detection.place_id (détections)
 --   - weather_station.place_id (stations météo)
 
--- On recrée la table à zéro (relançable)
+-- On recrée la table à zéro
 DROP TABLE IF EXISTS place CASCADE;
 
 -- Table finale PLACE
--- place_id = clé primaire auto-générée (identifiant technique)
+-- place_id = clé primaire auto-générée
 CREATE TABLE place (
   place_id        INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   space_label     VARCHAR(255),
@@ -42,7 +41,7 @@ CREATE TABLE place (
   population      INTEGER
 );
 
--- Chargement depuis la table staging space_complet (créée dans script 01)
+-- Chargement depuis la table staging space_complet (script 01)
 INSERT INTO place (
   space_label,
   wikidata_id,
@@ -70,15 +69,15 @@ FROM space_complet;
 -- 2) TABLE FINALE : FALCON
 -- ============================================================
 -- Rôle : table de référence des faucons sélectionnés (les 30)
--- But : éviter de répéter le texte de l'identifiant partout dans bird_detection
--- On crée un falcon_id (clé technique) + falcon_code (clé métier = identifiant individu)
+-- pour éviter de répéter le texte de l'identifiant partout dans bird_detection
+-- On crée un falcon_id + falcon_code (clé métier = identifiant individu)
 
 DROP TABLE IF EXISTS falcon CASCADE;
 
 CREATE TABLE falcon (
   falcon_id   SERIAL PRIMARY KEY,      -- identifiant auto (clé technique)
   falcon_code TEXT UNIQUE NOT NULL,    -- identifiant individu (clé métier)
-  tag_id      TEXT,                    -- identifiant du tag GPS (si dispo)
+  tag_id      TEXT,                    -- identifiant du tag GPS
   nickname    TEXT NOT NULL DEFAULT 'NONE' -- optionnel (futur usage)
 );
 
@@ -99,18 +98,18 @@ SELECT
     LIMIT 1
   ) AS tag_id,
 
-  -- Pour l’instant : pas de surnom, valeur par défaut
+  -- Pour l’instant : pas de surnom, donc valeur par défaut
   'NONE' AS nickname
 FROM selected_falcons s;
 
 -- ============================================================
 -- 3) TABLE FINALE : BIRD_DETECTION
 -- ============================================================
--- Rôle : table "fact" principale (énorme volume) = les points GPS
+-- Rôle : table principale avec un énorme volume = les points GPS
 -- Chaque ligne = 1 détection (position) d’un faucon à un instant donné
 -- On relie :
 --   - falcon_id (obligatoire) -> table falcon
---   - place_id (optionnel) -> table place (rempli plus tard script 03)
+--   - place_id (optionnel) -> table place (remplie plus tard script 03)
 
 DROP TABLE IF EXISTS bird_detection CASCADE;
 
@@ -121,13 +120,13 @@ CREATE TABLE bird_detection (
   speed        DOUBLE PRECISION,        -- vitesse au sol
   altitude     DOUBLE PRECISION,        -- altitude (height_above_msl)
   falcon_id    INT NOT NULL,            -- FK obligatoire : chaque détection appartient à un faucon
-  place_id     INT,                     -- FK optionnelle : lieu le plus proche (calculé script 03)
+  place_id     INT,                     -- FK optionnelle : lieu le plus proche (calculé en script 03)
 
-  -- Clé étrangère vers falcon
+  -- FK vers falcon
   CONSTRAINT fk_bird_detection_falcon
     FOREIGN KEY (falcon_id) REFERENCES falcon(falcon_id),
 
-  -- Clé étrangère vers place
+  -- FK vers place
   CONSTRAINT fk_bird_detection_place
     FOREIGN KEY (place_id) REFERENCES place(place_id)
 );
@@ -151,7 +150,7 @@ SELECT
 FROM falcon_positions_30_downsampled p
 JOIN falcon f
   ON f.falcon_code = p.individual_local_identifier
--- On élimine les points sans coordonnées (impossible à cartographier / matcher)
+-- On élimine les points sans coordonnées (impossible à cartographier et matcher)
 WHERE p.latitude IS NOT NULL
   AND p.longitude IS NOT NULL;
 
@@ -159,7 +158,6 @@ WHERE p.latitude IS NOT NULL
 -- 4) TABLE FINALE : WEATHER_STATION
 -- ============================================================
 -- Rôle : table de référence des stations météo (9 stations)
--- But :
 --  - 1 ligne par station
 --  - station_code unique (clé métier)
 --  - place_id sera rempli dans script 03 (matching par nom puis patch)
@@ -179,13 +177,13 @@ CREATE TABLE weather_station (
 
 -- On crée 1 ligne par station_code
 -- DISTINCT ON = technique Postgres pour garder 1 seule ligne par station_code
--- ORDER BY : on essaye de garder la ligne la plus "propre" (nom non NULL en priorité)
+-- ORDER BY : on essaye de garder la ligne la plus propre (nom non NULL en priorité)
 INSERT INTO weather_station (station_code, name, province, place_id)
 SELECT DISTINCT ON (w.station_code)
   w.station_code,
   w.station_name,
   w.province,
-  NULL::INT AS place_id  -- volontairement NULL ici : sera enrichi au script 03
+  NULL::INT AS place_id  -- volontairement NULL ici : enrichi au script 03
 FROM weather_daily_work w
 WHERE w.station_code IS NOT NULL
   AND BTRIM(w.station_code) <> ''
@@ -203,8 +201,7 @@ ON weather_station (station_code);
 -- ============================================================
 -- Rôle : table "fact" météo (mesures quotidiennes)
 -- Chaque ligne = 1 station + 1 date (obs_date)
--- On impose une unicité : (station_id, obs_date) unique
--- => évite les doublons si on relance l'insert
+-- On impose une unicité : (station_id, obs_date) unique pour éviter les doublons si on relance l'insert
 
 DROP TABLE IF EXISTS weather_measurement CASCADE;
 
@@ -297,4 +294,4 @@ ON weather_measurement (obs_date);
 CREATE INDEX ix_weather_measurement_time
 ON weather_measurement (time);
 
-COMMIT; -- Fin transaction
+COMMIT; -- Fin
