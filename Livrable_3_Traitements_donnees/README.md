@@ -137,7 +137,7 @@ Les détections trop éloignées ne sont pas supprimées mais conservées sans r
 ```bash
 git clone git@github.com:Edelweiss-Lilas/Migration_animale.git
 ```
-###2. Activer git lfs
+### 2. Activer git lfs
 Pour parvenir à télécharger nécessaire d'installer au préalable la dépendance git lfs à la racine du repository c'est-à-dire à Migration_animale
 ```bash
 sudo apt-get install git-lfs
@@ -145,7 +145,7 @@ sudo apt-get install git-lfs
 ```bash
 git lfs install
 ```
-###3. Téléchargement des csv
+### 3. Téléchargement des csv
 ```bash
 git lfs pull 
 ```
