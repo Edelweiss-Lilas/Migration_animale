@@ -9,9 +9,10 @@
 --  - Préparer une météo propre dans une table unique
 -- ============================================================
 
--- Active l'extension unaccent (permet de comparer "Séville" et "Seville")
+-- Active l'extension unaccent (permet de comparer "Séville" et "Seville") ainsi que l'extension postgis afin de reconnaître le type de données GEOMETRY.
 -- IF NOT EXISTS = ne fait rien si déjà installée
 CREATE EXTENSION IF NOT EXISTS unaccent;
+CREATE EXTENSION IF NOT EXISTS postgis SCHEMA crec;
 
 BEGIN; -- Début transaction : tout ou rien (propre et sûr)
 
@@ -49,286 +50,585 @@ END $$;
 -- 1) CITY (staging)
 -- ----------------------------
 
--- On repart d'une table vide pour éviter les doublons si on relance le script
+-- PARTIE 1 : FORMATION DES TABLES DE TRAVAIL + IMPORTS JEU DE DONNEES
+DROP TABLE IF EXISTS communes_global CASCADE;
+-- création d'une table communes_global
+create table communes_global(
+    commune VARCHAR,
+    city_label VARCHAR,
+    wikidata_id VARCHAR,
+    type_label VARCHAR,
+    continent VARCHAR,
+    contientLabel VARCHAR,
+    pays VARCHAR,
+    paysLabel VARCHAR,
+    communauteAutonome VARCHAR,
+    province_label VARCHAR,
+    coordonnees GEOMETRY(POINT, 4326),
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    elevation NUMERIC,
+    pointCulminant VARCHAR,
+    pointCulminantLabel VARCHAR,
+    superficie NUMERIC,
+    area NUMERIC,
+    "population" NUMERIC
+);
+
+-- import des données du fichier csv brut communes_global.csv
+DROP TABLE IF EXISTS espacesvert CASCADE;
+-- création  de la table espacesvert
+create table espacesvert(
+    espace VARCHAR,
+    space_label VARCHAR,
+    wikidata_id VARCHAR,
+    type_label VARCHAR,
+    communauteAutonome VARCHAR,
+    province_label VARCHAR,
+    coordonnees GEOMETRY(POINT, 4326),
+    area NUMERIC,
+    visieurs NUMERIC,
+    climatLabel VARCHAR
+);
+
+-- import des données du fichier csv brut espacesvert_complet.csv
+
+-- création d'une table polygones_parc
+SELECT postgis_version(); --vérifier que PostGIS est bien installé
+DROP TABLE IF EXISTS polygones_parc CASCADE;
+
+create table polygones_parc(
+ID_faucons TEXT,
+"Date _Passage" DATE,
+Ville_Espagne VARCHAR(50),
+geom_point GEOMETRY(POINT, 4326), 
+geom_poly GEOMETRY(POLYGON, 2154) -- indiquer qu'il s'agit du type de données GEOMETRY (POLYGON, 2154) car sinon dbeaver essaye d'importer les polygones en VARCHAR 
+);
+
+--import des données du fichier polygones_parc
+DROP TABLE IF EXISTS polygones_city CASCADE;
+--creation d'une table polygones_city
+create table polygones_city(
+ID_faucons TEXT,
+date_passage DATE, 
+Ville_Espagne VARCHAR(50),
+geom_point GEOMETRY(POINT, 4326), 
+geom_poly geometry(MultiPolygon, 2154)
+); 
+
+-- certaines lignes du CSV contiennent des MultiPolygon (comme Ciudad Real qui a plusieurs polygones) donc geometry(MultiPolygon, 2154);
+
+
+-- import des données du fichier falcon_city2.csv
+-- fichier trop lourd pour être importé dans dbeaver avec limite mémoire de java : commandes terminal : 
+-- chmod 644 /home/vielmas/Desktop/M2_TNAH/Voie_crecerelle_project/Polygones/falcon_city2.csv gestion des permissions du fichier csv
+-- cp /home/vielmas/Desktop/M2_TNAH/Voie_crecerelle_project/Polygones/falcon_city2.csv /tmp/falcon_city2.csv copier le fichier dans un dossier accessible
+-- se mettre dans l'interface dbeaver avec sudo -i -u postgres
+-- psql -U postgres -d CRECERELLE -c "\copy polygones_city FROM '/tmp/falcon_city2.csv' DELIMITER ',' CSV HEADER" pour faire une copie du fichier csv dans dbeaver.  Importer via psql en ligne de commande contourne le problème Java
+
+--Résultat : copie de 728780 lignes
+
+SELECT COUNT(*) FROM polygones_city;
+
+
+
+--PARTIE 2 : TRAITEMENT DES JEUX DE DONNEES POLYGONES
+
+
+-- polygones_parc
+--Renommer la colonne ville_espagne
+alter table polygones_parc
+rename column ville_espagne to parc_espagne;
+alter table polygones_parc
+rename column "Date _Passage" to date_passage;
+--Conversion des types de données
+alter table polygones_parc 
+alter column date_passage type DATE
+using date_passage::DATE;
+
+
+-- Enlever les accents et signes spécifiques
+UPDATE polygones_parc
+SET
+ parc_espagne  = REGEXP_REPLACE(
+       REPLACE(
+           public.unaccent(TRIM(parc_espagne)),
+           '''',
+           ''
+       ),
+       '[^a-zA-Z0-9\s]',
+       '',
+       'g'
+   );
+
+-- Gérer les doublons : je veux qu'il n'y ait qu'une seule occurence pour chaque ville
+--identification des doublons
+SELECT parc_espagne, COUNT(*) 
+FROM polygones_parc
+GROUP BY parc_espagne
+HAVING COUNT(*) > 1;
+
+--supprimer les doublons ou multiples occurences
+DELETE FROM polygones_parc
+WHERE ctid NOT IN (
+    SELECT MIN(ctid)
+    FROM polygones_parc
+    GROUP by parc_espagne 
+);
+
+--vérifier qu'il n'y a plus de doublons
+SELECT ville_espagne, COUNT(*) 
+FROM polygones_city 
+GROUP BY ville_espagne 
+HAVING COUNT(*) > 1;
+
+SELECT COUNT(*) FROM polygones_parc pp ; -- 7 parcs traversés par les faucons
+
+
+
+-- polygones_city
+
+-- Enlever les accents et signes spécifiques
+UPDATE polygones_city
+SET
+ ville_espagne  = REGEXP_REPLACE(
+       REPLACE(
+           public.unaccent(TRIM(ville_espagne )),
+           '''',
+           ''
+       ),
+       '[^a-zA-Z0-9\s]',
+       '',
+       'g'
+   );
+
+-- Gérer les doublons : je veux qu'il n'y ait qu'une seule occurence pour chaque ville
+--identification des doublons
+SELECT ville_espagne, COUNT(*) 
+FROM polygones_city 
+GROUP BY ville_espagne 
+HAVING COUNT(*) > 1;
+
+--supprimer les doublons ou multiples occurences
+DELETE FROM polygones_city
+WHERE ctid NOT IN (
+    SELECT MIN(ctid)
+    FROM polygones_city
+    GROUP BY ville_espagne
+);
+
+--vérifier qu'il n'y a plus de doublons
+SELECT ville_espagne, COUNT(*) 
+FROM polygones_city 
+GROUP BY ville_espagne 
+HAVING COUNT(*) > 1;
+
+SELECT COUNT(*) FROM polygones_city; -- 1253 villes traversées par les faucons
+
+
+--PARTIE 3 : TRAITEMENT DONNEE DE CITY
+
+-- création de la table city
+-- prérequis : import du csv brut communes_global dans dbeaver
 DROP TABLE IF EXISTS city CASCADE;
 
--- Table de travail pour les villes (format "propre")
--- On choisit les colonnes qu'on veut garder / nettoyer
 CREATE TABLE city (
-  commune             VARCHAR,
-  city_label          VARCHAR,
-  wikidata_id         VARCHAR,
-  type_label          VARCHAR,
-  continent           VARCHAR,
-  continentlabel      VARCHAR,
-  pays                VARCHAR,
-  payslabel           VARCHAR,
-  communauteautonome  VARCHAR,
-  province_label      VARCHAR,
-  coordonnees         VARCHAR,   -- texte de type "Point(lon lat)"
-  latitude            FLOAT,
-  longitude           FLOAT,
-  elevation           INTEGER,
-  pointculminant      VARCHAR,
-  pointculminantlabel VARCHAR,
-  superficie          FLOAT,
-  population          INTEGER
+  commune VARCHAR(50),
+  city_label VARCHAR(50),
+  wikidata_id VARCHAR(50),
+  type_label VARCHAR(50),
+  continent VARCHAR(50),
+  continentlabel VARCHAR(50),
+  pays VARCHAR(50),
+  payslabel VARCHAR(50),
+  communauteautonome VARCHAR(50),
+  province_label VARCHAR(50),
+  coordonnees VARCHAR(50),
+  latitude FLOAT,
+  longitude FLOAT,
+  elevation INTEGER,
+  pointculminant VARCHAR(50),
+  pointculminantlabel VARCHAR(50),
+  superficie FLOAT,
+  population INTEGER
 );
 
--- On charge les données depuis la table brute (CSV importé)
-INSERT INTO city (
-  commune,
-  city_label,
-  wikidata_id,
-  type_label,
-  continent,
-  continentlabel,
-  pays,
-  payslabel,
-  communauteautonome,
-  province_label,
-  coordonnees,
-  latitude,
-  longitude,
-  elevation,
-  pointculminant,
-  pointculminantlabel,
-  superficie,
-  population
-)
+-- import des données issues de communes_global
+INSERT INTO city  (
+commune,
+city_label,
+wikidata_id,
+type_label,
+continent,
+continentlabel,
+pays,
+payslabel,
+communauteautonome,
+province_label,
+coordonnees,
+latitude,
+longitude,
+elevation,
+pointculminant,
+pointculminantlabel,
+superficie,
+population)
 SELECT
-  commune,
-  city_label,
-  wikidata_id,
-  type_label,
-  continent,
-  "contientLabel",         -- colonne brute
-  pays,
-  "paysLabel",
-  "communauteAutonome",
-  province_label,
-  coordonnees,
-  latitude,
-  longitude,
-  elevation,
-  "pointCulminant",
-  "pointCulminantLabel",
-  superficie,
-  population
-FROM communes_global;
+commune,
+city_label,
+wikidata_id,
+type_label,
+continent,
+contientlabel , --vigilance erreur de frappe dans le nommage de la colonne dans le fichier csv brut
+pays,
+payslabel,
+communauteautonome,
+province_label,
+coordonnees,
+latitude,
+longitude,
+elevation,
+pointculminant,
+pointculminantlabel,
+superficie,
+population
+from communes_global;
 
--- Suppression des colonnes qu'on ne veut pas garder dans city
--- pour alléger le modèle et ne garder que ce qui sert
+--traitement des données dans city
+--suppression des colonnes non souhaitées dans city
 ALTER TABLE city
-  DROP COLUMN commune,
-  DROP COLUMN continent,
-  DROP COLUMN continentlabel,
-  DROP COLUMN pays,
-  DROP COLUMN payslabel,
-  DROP COLUMN latitude,
-  DROP COLUMN longitude,
-  DROP COLUMN pointculminant,
-  DROP COLUMN pointculminantlabel;
+ DROP COLUMN commune,
+ DROP COLUMN  continent,
+ DROP column continentlabel ,
+ DROP COLUMN  pays,
+ DROP COLUMN payslabel ,
+DROP COLUMN latitude,
+DROP COLUMN longitude,
+ DROP COLUMN pointculminant ,
+ DROP column pointculminantlabel;
 
--- Renommer des colonnes pour avoir un modèle commun "place"
--- (ex : espace vert ou ville = space_label)
+
+-- Renommer les colonnes
+ALTER TABLE city 
+RENAME COLUMN communauteautonome TO ccaa_label;
+
 ALTER TABLE city
-  RENAME COLUMN communauteautonome TO ccaa_label;
+RENAME COLUMN  city_label to space_label;
 
-ALTER TABLE city
-  RENAME COLUMN city_label TO space_label;
-
--- Nettoyage simple : trim / initcap / nullif
--- - TRIM = enlève les espaces inutiles
--- - INITCAP = met en "jolie forme" (première lettre majuscule)
--- - NULLIF = transforme "" en NULL, ou 0 en NULL si 0 veut dire "inconnu"
+-- Traitement des données
 UPDATE city
 SET
-  space_label    = INITCAP(TRIM(space_label)),
-  wikidata_id    = TRIM(wikidata_id),
-  type_label     = INITCAP(TRIM(type_label)),
-  ccaa_label     = INITCAP(TRIM(ccaa_label)),
-  province_label = INITCAP(TRIM(province_label)),
-  coordonnees    = NULLIF(TRIM(coordonnees), ''),
-  elevation      = NULLIF(elevation, 0),
-  population     = NULLIF(population, 0);
+   space_label = INITCAP(TRIM(space_label)),
+   wikidata_id = TRIM(wikidata_id),
+   type_label = INITCAP(TRIM(type_label)),
+   ccaa_label = INITCAP(TRIM(ccaa_label)),
+   province_label = INITCAP(TRIM(province_label)),
+   elevation = NULLIF(elevation, 0),     
+   population = NULLIF(population, 0);
 
--- Conversion de types : on fixe des types cohérents
--- (évite les soucis ensuite pour calculs/agrégations)
+-- Conversion type de données
 ALTER TABLE city
-  ALTER COLUMN elevation   TYPE NUMERIC USING elevation::NUMERIC,
-  ALTER COLUMN superficie  TYPE NUMERIC USING superficie::NUMERIC,
-  ALTER COLUMN population  TYPE INTEGER USING population::INTEGER;
+ALTER COLUMN elevation TYPE NUMERIC
+   USING elevation::NUMERIC,
+ALTER COLUMN superficie TYPE NUMERIC
+   USING superficie::NUMERIC,
+ALTER COLUMN population TYPE NUMERIC
+   USING population::NUMERIC;
 
--- Normalisation des textes : suppression accents + caractères spéciaux
--- pour éviter les faux doublons ("Ávila" vs "Avila") et faciliter les jointures
+--Enlever les accents et signes spécifiques
 UPDATE city
 SET
-  space_label = REGEXP_REPLACE(
-    REPLACE(unaccent(TRIM(space_label)), '''', ''), -- enlève aussi les apostrophes
-    '[^a-zA-Z0-9\s]', '', 'g'                       -- garde lettres/chiffres/espaces
-  ),
-  ccaa_label = REGEXP_REPLACE(
-    REPLACE(unaccent(TRIM(ccaa_label)), '''', ''),
-    '[^a-zA-Z0-9\s]', '', 'g'
-  ),
-  province_label = REGEXP_REPLACE(
-    REPLACE(unaccent(TRIM(province_label)), '''', ''),
-    '[^a-zA-Z0-9\s]', '', 'g'
-  );
+   space_label = REGEXP_REPLACE(
+       REPLACE(
+           public.unaccent(TRIM(space_label)),
+           '''',
+           ''
+       ),
+       '[^a-zA-Z0-9\s]',
+       '',
+       'g'
+   ),
+   ccaa_label = REGEXP_REPLACE(
+       REPLACE(
+           public.unaccent(TRIM(ccaa_label)),
+           '''',
+           ''
+       ),
+       '[^a-zA-Z0-9\s]',
+       '',
+       'g'
+   ),
+   province_label = REGEXP_REPLACE(
+       REPLACE(
+           public.unaccent(TRIM(province_label)),
+           '''',
+           ''
+       ),
+       '[^a-zA-Z0-9\s]',
+       '',
+       'g'
+   );
 
--- Gestion des doublons : on garde 1 ligne par coordonnees
--- ctid = identifiant interne d'une ligne Postgres (pratique en staging)
+-- Gérer les doublons et faux-doublons
 DELETE FROM city
 WHERE ctid NOT IN (
-  SELECT MIN(ctid)
-  FROM city
-  GROUP BY coordonnees
+   SELECT MIN(ctid)
+   FROM city
+   GROUP BY coordonnees);
+
+-- Identifier les space_label qui prennent la forme d’un wikidata_id 
+delete from city cg
+where "wikidata_id" = 'Q113502358';
+
+-- Insérer les métdonnées de Ceuta et Melilla
+insert  into city (space_label,wikidata_id, type_label, ccaa_label,  province_label,coordonnees, elevation , superficie, population)
+values ('Melilla','Q5831','City', 'NULL', 'NULL', 'Point(-2.9475 35.2825)','30','12.3338','86780');
+
+insert  into city (space_label,wikidata_id, type_label, ccaa_label,  province_label,coordonnees, elevation , superficie, population)
+values ('Ceuta','Q5823','City', 'NULL', 'NULL', 'Point(-5.3 35.886667)','10','18.5','83595');
+
+-- création d'une nouvelle colonne area pour les polygones retournés par le script python
+alter table city
+add column area GEOMETRY(POLYGON, 2154);
+
+--adapter le type de données de la colonne area aux polygones multiples
+-- Conversion type de données
+ALTER TABLE  city
+ALTER COLUMN area TYPE geometry(MultiPolygon, 2154)
+   USING area::geometry(MultiPolygon, 2154);
+
+-- Insérer les polygones qui correspondent aux villes qui figurent dans city
+--Comparaison des tables city et polygones city
+--Visualiser et comptabiliser les différences sans rien modifier
+-- On veut garder dans city uniquement les villes qui ont un polygone dans polygones_city. Donc on cherche les villes présentes dans city mais absentes de polygones_city :
+
+select count(*)
+from city;
+-- la table city comporte 7111 entrées
+
+select count(*)
+from polygones_city;
+--la table polygones_city comporte 1253 entrées
+
+SELECT COUNT(*) FROM (
+    SELECT space_label FROM city
+    EXCEPT
+    SELECT ville_espagne FROM polygones_city
+) AS differences;
+-- résultat 6257
+
+--vérifier à partir d'un exemple
+-- obtenir la liste des villes en différence
+SELECT space_label FROM city
+    EXCEPT
+    SELECT ville_espagne FROM polygones_city;
+--prendre l'exemple de La Viola
+select *
+from city
+where space_label = 'La Vidola';
+-- La Viola figure bien dans la liste des villes de city
+
+select *
+from polygones_city
+where ville_espagne = 'La Vidola';
+-- La Viola ne figure pas parmi la liste des villes ayant un polygone
+
+--supprimer les lignes des villes qui n'ont pas de polygone dans city
+DELETE FROM city
+WHERE space_label NOT IN (
+    SELECT ville_espagne FROM polygones_city
 );
 
--- Suppression d'une ligne problématique (ID Wikidata incorrect)
-DELETE FROM city
-WHERE wikidata_id = 'Q113502358';
+-- Insérer les polygones dans city 
+--tester et vérifier la correspondance entre les city et polygones_city avec l'exemple de Cordoue dont le polygone commence par 322313.103289
 
--- Patch manuel : ajout de 3 lieux pour pouvoir matcher les stations météo
--- (les stations comme Ceuta/Melilla/Maspalomas auront un place_id ensuite)
-INSERT INTO city (space_label, wikidata_id, type_label, ccaa_label, province_label, coordonnees, elevation, superficie, population)
-VALUES
-  ('Melilla','Q5831','City', NULL, NULL, 'Point(-2.9475 35.2825)', 30, 12.3338, 86780),
-  ('Ceuta','Q5823','City', NULL, NULL, 'Point(-5.3 35.886667)', 10, 18.5, 83595),
-  ('Maspalomas','Q580743','City','Canary Islands','Las Palmas','Point(-15.586017 27.760562)', 0, NULL, NULL);
+SELECT city.space_label , polygones_city.geom_poly
+FROM city
+JOIN polygones_city ON city.space_label = polygones_city.ville_espagne;
+
+-- vérification avec un select count = nos 765 villes renseignées dans city seront bien associées à leur polygone
+select count(*) from (
+SELECT city.space_label , polygones_city.geom_poly
+FROM city
+JOIN polygones_city ON city.space_label = polygones_city.ville_espagne);
+
+--mise à jour de la table city avec les polygones renseignés dans la colonne area
+UPDATE city
+SET area = polygones_city.geom_poly
+FROM polygones_city
+WHERE city.space_label = polygones_city.ville_espagne;
+
 
 -- ----------------------------
 -- 2) ESPACES VERTS (staging)
 -- ----------------------------
 
--- On recrée la table staging à chaque exécution
-DROP TABLE IF EXISTS espacesvert CASCADE;
-
--- Table de travail pour les espaces verts (parcs, réserves, etc.)
-CREATE TABLE espacesvert (
-  espace           VARCHAR,
-  space_label      VARCHAR,
-  wikidata_id      VARCHAR,
-  type_label       VARCHAR,
+-- création de la table parc
+DROP TABLE IF EXISTS parc CASCADE;
+CREATE TABLE parc (
+  espace VARCHAR,
+  space_label VARCHAR,
+  wikidata_id VARCHAR,
+  type_label VARCHAR,
   communaute_label VARCHAR,
-  province_label   VARCHAR,
-  coordonnees      VARCHAR,
-  area             FLOAT,
-  visiteurs        INTEGER,
-  climatlabel      VARCHAR
+  province_label VARCHAR,
+  coordonnees VARCHAR,
+  superficie FLOAT,
+  visiteurs INTEGER,
+  climatlabel VARCHAR
 );
 
--- Chargement depuis table brute
-INSERT INTO espacesvert (
-  espace,
-  space_label,
-  wikidata_id,
-  type_label,
-  communaute_label,
-  province_label,
-  coordonnees,
-  area,
-  visiteurs,
-  climatlabel
-)
-SELECT
-  espace,
-  space_label,
-  wikidata_id,
-  type_label,
-  communaute_label,
-  province_label,
-  coordonnees,
-  area,
-  visiteurs,
-  "climatLabel"
-FROM espacesvert_complet;
+-- insérer les données de la table espacesvert
+INSERT INTO parc (
+espace,
+space_label,
+wikidata_id,
+type_label,
+communaute_label,
+province_label,
+coordonnees,
+superficie,
+visiteurs,
+climatlabel)
+select
+espace,
+space_label,
+wikidata_id,
+type_label,
+communaute_label,
+province_label,
+coordonnees,
+area::double precision, -- on force la conversion car sinon passe la colonne en texte alors que c'est des nombres
+NULLIF(TRIM(visiteurs), '')::INTEGER, -- on a concaténé les données de visiteurs pour qu'il n'y est pas de confusion concernant le type de données.
+"climatLabel"
+from espacesvert_complet;
 
--- On supprime les colonnes inutiles pour le projet final
-ALTER TABLE espacesvert
-  DROP COLUMN espace,
-  DROP COLUMN visiteurs,
-  DROP COLUMN climatlabel;
+--suppression des colonnes non souhaitées dans natural spaces
+alter table  parc 
+drop column espace,
+drop column visiteurs,
+drop column climatlabel;
 
--- Harmonisation des noms de colonnes (comme city)
-ALTER TABLE espacesvert
-  RENAME COLUMN communaute_label TO ccaa_label;
+--Renommer les colonnes
+ALTER TABLE  parc
+RENAME COLUMN communaute_label TO ccaa_label;
 
--- Nettoyage (trim/initcap/nullif)
-UPDATE espacesvert
+-- Traitement données
+UPDATE parc
 SET
-  space_label    = INITCAP(TRIM(space_label)),
-  wikidata_id    = TRIM(wikidata_id),
-  type_label     = INITCAP(TRIM(type_label)),
-  ccaa_label     = INITCAP(TRIM(ccaa_label)),
-  province_label = INITCAP(NULLIF(TRIM(province_label), '')),
-  coordonnees    = NULLIF(TRIM(coordonnees), ''),
-  area           = NULLIF(area, 0);
+   space_label = INITCAP(TRIM(space_label)),
+   wikidata_id = TRIM(wikidata_id),
+   type_label = INITCAP(TRIM(type_label)),
+   ccaa_label = INITCAP(TRIM(ccaa_label)),
+   province_label = INITCAP(nullif(TRIM(province_label), '')), --ajout d’un nullif car certaines données sur les provinces sont manquantes
+   coordonnees = NULLIF(TRIM(coordonnees), ''),
+   superficie= NULLIF(superficie, 0);
 
--- Conversion type : surface en NUMERIC(10,2)
-ALTER TABLE espacesvert
-  ALTER COLUMN area TYPE NUMERIC(10,2) USING area::NUMERIC(10,2);
+-- Conversion type de données
+ALTER TABLE  parc
+ALTER COLUMN superficie TYPE NUMERIC(10, 2)
+   USING superficie::NUMERIC(10, 2);
 
--- Normalisation texte (unaccent + suppression caractères spéciaux)
-UPDATE espacesvert
+-- Enlever les accents et signes spécifiques
+update parc
 SET
-  space_label = REGEXP_REPLACE(
-    REPLACE(unaccent(TRIM(space_label)), '''', ''),
-    '[^a-zA-Z0-9\s]', '', 'g'
-  ),
-  ccaa_label = REGEXP_REPLACE(
-    REPLACE(unaccent(TRIM(ccaa_label)), '''', ''),
-    '[^a-zA-Z0-9\s]', '', 'g'
-  ),
-  province_label = REGEXP_REPLACE(
-    REPLACE(unaccent(TRIM(province_label)), '''', ''),
-    '[^a-zA-Z0-9\s]', '', 'g'
-  );
+   space_label = REGEXP_REPLACE(
+       REPLACE(
+           public.unaccent(TRIM(space_label)),
+           '''',
+           ''
+       ),
+       '[^a-zA-Z0-9\s]',
+       '',
+       'g'
+   ),
+   ccaa_label = REGEXP_REPLACE(
+       REPLACE(
+           public.unaccent(TRIM(ccaa_label)),
+           '''',
+           ''
+       ),
+       '[^a-zA-Z0-9\s]',
+       '',
+       'g'
+   ),
+   province_label = REGEXP_REPLACE(
+       REPLACE(
+           public.unaccent(TRIM(province_label)),
+           '''',
+           ''
+       ),
+       '[^a-zA-Z0-9\s]',
+       '',
+       'g'
+   );
 
--- Gestion doublons : même area, on garde 1 ligne
-DELETE FROM espacesvert
+-- Gérer les doublons et faux doublons
+DELETE FROM  parc
 WHERE ctid NOT IN (
   SELECT MIN(ctid)
-  FROM espacesvert
-  GROUP BY area
-);
+  FROM  parc
+  GROUP BY superficie);
+
+-- création d'une nouvelle colonne area = polygone issu du script
+alter table parc 
+add column area GEOMETRY(POLYGON, 2154);
+
+-- Insérer les polygones qui correspondent aux parcs qui figurent dans parc
+--ajout de la valeur des polygones connus pour les parcs  de Cabaneros, de las Tablas de Daimiel, de la Sierra de Guadarrama, Soto Del Henares
+select *
+from parc
+where space_label like 'Parque Nacional De Las Tablas De Daimiel' or space_label = 'Parque Nacional De La Sierra De Guadarrama' or space_label='Parque Nacional De Cabaneros' or space_label='Soto Del Henares';
+
+update parc --Parque Nacional De Las Tablas De Daimiel
+set area='POLYGON ((431651.049466 4329483.33087, 431538.559328 4329617.700484, 431426.752021 4329781.972963, 431331.797847 4329956.529618, 431254.634154 4330139.647301, 431196.02267 4330329.518349, 431156.541982 4330524.268436, 431136.581827 4330721.975071, 431136.339243 4330920.686576, 431155.816626 4331118.441355, 431194.821702 4331313.287256, 431252.96943 4331503.300842, 431329.6858 4331686.606379, 431424.2135 4331861.39435, 431535.619393 4332025.939324, 431662.803725 4332178.61698, 431804.510987 4332317.920149, 431959.342305 4332442.473689, 432125.769247 4332551.04806, 432302.148918 4332642.57146, 432486.740172 4332716.140409, 432677.7208 4332771.028666, 432809.321621 4332801.864493, 433021.258678 4332857.169889, 433292.057517 4332942.79815, 433372.941127 4332970.255794, 433371.181196 4332975.399134, 433303.642128 4333212.451358, 433254.828971 4333428.565434, 433230.219496 4333648.752608, 433230.115711 4333870.310743, 433230.259126 4333872.918061, 433221.380599 4333957.350588, 433219.494813 4334146.915389, 433235.565603 4334335.807157, 433269.448581 4334522.328775, 433320.839321 4334704.804422, 433445.538817 4335078.677406, 433514.76855 4335257.256491, 433600.762731 4335428.394583, 433702.732725 4335590.522206, 433819.743384 4335742.152518, 433950.721625 4335881.894946, 433971.175388 4335899.905315, 433991.983909 4335937.594678, 434101.883448 4336097.687858, 434226.790483 4336246.368615, 434365.527524 4336382.235346, 434516.786704 4336504.007244, 434679.142116 4336610.536373, 434851.063243 4336700.818491, 435030.929399 4336774.002514, 435217.044995 4336829.39854, 435407.655533 4336866.484356, 435600.96414 4336884.910356, 435795.148508 4336884.502839, 435988.378075 4336865.265646, 436178.831277 4336827.380126, 436364.712726 4336771.203422, 436544.270129 4336697.265109, 436715.81081 4336606.262199, 436877.717666 4336499.052569, 437018.595744 4336384.660194, 437039.699949 4336423.090358, 437143.378066 4336576.357032, 437260.7775 4336719.385695, 437390.893317 4336850.952027, 437597.089784 4337040.999155, 437771.784438 4337184.622587, 437863.534677 4337251.733856, 438124.998105 4337567.233588, 438264.484469 4337718.910858, 438729.076961 4338174.582313, 439501.277029 4338985.260417, 439666.455142 4339140.09044, 439848.073479 4339275.260425, 440043.804776 4339389.038297, 440360.177951 4339549.714595, 440532.681734 4339627.292666, 440711.742635 4339688.227925, 441056.284642 4339787.566492, 441262.715909 4339835.402086, 441473.049619 4339861.128388, 441684.924665 4339864.456604, 441857.356914 4339848.84471, 442760.631539 4339936.319587, 442952.768896 4339945.632392, 443144.912216 4339936.443453, 443335.284007 4339908.837773, 443522.123163 4339863.070732, 443703.701259 4339799.565712, 443878.338538 4339718.910191, 444044.419454 4339621.850304, 444200.407612 4339509.283938, 444344.859987 4339382.252432, 444476.440268 4339241.930937, 444593.931222 4339089.617549, 444696.245955 4338926.721301, 444782.437967 4338754.749125, 444851.709906 4338575.291913, 444903.420947 4338390.009803, 444923.951882 4338274.529828, 445029.680822 4338224.374816, 445198.169599 4338123.086102, 445355.900236 4338005.74507, 445501.348744 4337873.485466, 445633.109805 4337727.585177, 445749.910347 4337569.453887, 445850.621848 4337400.619457, 445934.271236 4337222.713157, 446000.050294 4337037.453914, 446047.323465 4336846.631697, 446075.633999 4336652.090223, 446084.708361 4336455.709146, 446074.458872 4336259.385893, 446065.143166 4336167.763976, 445990.803325 4335436.421117, 445962.442005 4335247.566715, 445916.19758 4335062.278283, 445852.491687 4334882.245206, 445771.90517 4334709.10895, 445675.172784 4334544.4481, 445563.176495 4334389.763967, 445436.937439 4334246.466896, 445297.606612 4334115.863411, 445146.454374 4333999.144301, 444984.85887 4333897.373762, 444814.293459 4333811.479696, 444636.313288 4333742.245249, 444452.541107 4333690.301674, 444264.652473 4333656.122569, 443979.717803 4333618.238249, 443941.408152 4333544.532306, 443831.806608 4333377.045718, 443706.012845 4333221.353119, 443645.0548 4333159.696305, 443628.892681 4333106.833702, 443565.34436 4332929.364864, 443485.370135 4332758.667175, 443389.680449 4332596.257011, 443279.125351 4332443.577124, 443154.686945 4332301.983831, 443017.470667 4332172.73496, 442654.966469 4331862.18237, 442383.75757 4331394.576175, 442396.567747 4331209.02591, 442390.923612 4331013.584596, 442366.222673 4330819.628345, 442322.701002 4330629.010854, 442260.774549 4330443.553909, 442181.035164 4330265.029978, 442084.244938 4330095.145264, 441971.328925 4329935.523406, 441843.366295 4329787.689956, 441701.580024 4329653.057801, 441547.325205 4329532.913661, 441382.076096 4329428.405786, 441207.412031 4329340.532991, 441025.002326 4329270.1351, 440836.590322 4329217.884927, 440643.976729 4329184.281841, 440544.045502 4329176.780967, 440408.905154 4329091.984229, 440234.245072 4329004.851786, 440051.923311 4328935.159729, 439863.676407 4328883.571843, 439671.297325 4328850.579479, 439509.562622 4328838.879982, 439452.696654 4328794.712898, 439287.315752 4328690.434672, 439112.543439 4328602.802318, 438958.479027 4328534.761958, 438789.107214 4328468.983748, 438614.464684 4328418.848226, 438570.621353 4328410.476381, 438523.073489 4328358.941561, 438386.284955 4328224.26805, 438237.215501 4328103.32858, 438077.238358 4327997.237246, 437907.827238 4327906.971363, 437636.973843 4327778.945389, 437572.532326 4327747.498744, 437393.716056 4327670.77116, 437208.289998 4327611.783382, 437018.009322 4327571.093764, 436824.675148 4327549.087456, 436630.117497 4327545.972763, 436467.430571 4327559.232025, 436331.45388 4327513.739219, 436241.429816 4327488.505973, 436054.201206 4327445.606053, 435863.720703 4327420.86473, 435671.745247 4327414.51021, 435480.045572 4327426.601106, 435473.437914 4327427.661114, 435424.633662 4327418.640193, 435355.87216 4327413.129348, 435215.993827 4327385.249033, 435116.503176 4327370.578284, 435096.515116 4327361.619478, 434916.304165 4327300.655894, 434731.116103 4327257.090686, 434542.626538 4327231.318037, 434352.540949 4327223.571141, 434162.579256 4327233.920094, 433974.460258 4327262.271257, 433789.886083 4327308.368105, 433610.526782 4327371.793547, 433437.280364 4327442.496896, 433255.953479 4327527.318687, 433123.267544 4327597.685212, 432960.441682 4327694.172595, 432807.465637 4327805.61947, 432665.709388 4327931.027772, 432536.442436 4328069.274405, 432420.822434 4328219.121299, 432319.88482 4328379.226497, 432234.533541 4328548.156173, 432165.532963 4328724.397475, 432100.79126 4328916.011327, 432034.115199 4328986.975907, 431900.448987 4329166.061594, 431895.292811 4329170.93495, 431764.002629 4329322.692359, 431651.049466 4329483.33087))'
+where wikidata_id ='Q1520216';
+
+update parc --Parque Nacional De La Sierra De Guadarrama
+set area='POLYGON ((401985.286688 4515437.054627, 401985.520115 4515444.673114, 401986.531105 4515456.592008, 401985.510733 4515459.105674, 401929.251109 4515650.578227, 401892.35355 4515846.704344, 401875.185432 4516045.531253, 401877.917695 4516245.079288, 401900.523135 4516443.361607, 401942.776674 4516638.403967, 402004.257606 4516828.264386, 402084.353784 4517011.052477, 402182.267711 4517184.948269, 402297.024486 4517348.220332, 402427.481507 4517499.24301, 402570.480489 4517634.750657, 402544.259068 4517757.116425, 402522.049445 4517961.002989, 402520.836914 4518166.092064, 402540.634228 4518370.226982, 402581.233203 4518571.261114, 402642.206909 4518767.080433, 402722.914163 4518955.625753, 402822.506268 4519134.914379, 402939.935937 4519303.060957, 403073.96831 4519458.297298, 403229.953041 4519621.260269, 403373.094203 4519756.759175, 403456.059733 4519821.067671, 403457.767924 4519823.044481, 403516.234936 4519962.379389, 403609.773485 4520135.375595, 403719.850391 4520298.348667, 403845.401287 4520449.722772, 403985.212187 4520588.034231, 404137.931218 4520711.94567, 404166.705864 4520730.932373, 404182.029443 4520756.198821, 404223.305966 4520817.048821, 404270.910504 4520878.895266, 404365.407941 4521032.571209, 404474.265816 4521178.104498, 404546.832764 4521266.447745, 404674.245389 4521407.347067, 404814.451127 4521535.522521, 404966.185093 4521649.817752, 405128.078395 4521749.201628, 405243.645314 4521812.795698, 405414.66748 4521896.557475, 405592.880837 4521963.673911, 405776.669675 4522013.536517, 405871.991274 4522029.867158, 405874.669219 4522062.120326, 405930.81142 4522443.729325, 405971.761596 4522647.721433, 406033.682934 4522846.35538, 406115.905292 4523037.481466, 406178.270703 4523163.896142, 406277.33014 4523341.350858, 406393.887029 4523507.836412, 406526.737836 4523661.633718, 406674.510778 4523801.154705, 406825.388077 4523917.052864, 406839.972783 4524191.26436, 406841.419509 4524218.457028, 406799.133398 4524558.501524, 406784.280168 4524763.657559, 406790.577159 4524969.254166, 406817.957764 4525173.116667, 406866.132368 4525373.088727, 406994.038675 4525805.101447, 407061.369252 4525996.322576, 407147.712023 4526179.745183, 407252.179838 4526353.48465, 407373.699319 4526515.755851, 407511.021886 4526664.891492, 407662.736587 4526799.359245, 407827.284593 4526917.77749, 408002.975218 4527018.92951, 408188.003287 4527101.775997, 408380.467688 4527165.465724, 408660.164357 4527242.533988, 408868.567442 4527288.155522, 409080.644372 4527311.318983, 409157.602536 4527311.478365, 409226.056261 4527379.465686, 409376.814791 4527502.538088, 409538.821251 4527610.375267, 409710.541644 4527701.956141, 409890.349997 4527776.413555, 410076.543751 4527833.042491, 410267.359885 4527871.306745, 410460.991612 4527890.844002, 410655.605484 4527891.46927, 410849.358754 4527873.176627, 411040.416822 4527836.139282, 411142.89056 4527805.690918, 411189.824701 4527794.134721, 411364.520117 4527733.533694, 411532.872089 4527657.057644, 411677.073733 4527574.707556, 411741.388603 4527546.654546, 411910.571414 4527452.42706, 411915.574407 4527449.314053, 411951.774616 4527426.782443, 412108.26894 4527318.7279, 412253.792808 4527196.298078, 412387.030457 4527060.599933, 412506.777211 4526912.86039, 412527.711459 4526884.362486, 412611.758191 4526760.486225, 412631.13708 4526729.486875, 412729.287816 4526553.296431, 412772.412127 4526453.358192, 412858.429641 4526305.871447, 412915.560421 4526182.378568, 412944.234394 4526164.918085, 413108.132848 4526053.627059, 413260.216689 4525926.666826, 413398.993656 4525785.283131, 413523.102055 4525630.863246, 413631.324122 4525464.922354, 413722.597972 4525289.088683, 413796.028017 4525105.08753, 413833.541327 4524974.930642, 413856.038571 4524908.743979, 413900.310117 4524720.417292, 413926.17899 4524528.694284, 413933.403141 4524335.368853, 413921.914975 4524142.249893, 413891.821985 4523951.144366, 413843.405743 4523763.840394, 413777.119265 4523582.090529, 413745.45402 4523515.94659, 413738.230243 4523490.320695, 413643.362613 4523264.301857, 413627.14076 4523231.454492, 413529.679321 4523056.709448, 413449.431979 4522941.610752, 413392.369326 4522755.682516, 413316.113327 4522573.565878, 413222.272514 4522399.855346, 413111.761399 4522236.243791, 412985.656954 4522084.325669, 412930.597499 4522029.942223, 412908.224567 4521876.518069, 412862.054688 4521688.992097, 412828.395115 4521593.230453, 412829.178843 4521581.303588, 412817.556526 4521376.502236, 412818.358094 4521324.307279, 412805.398625 4521147.661823, 412776.861581 4520972.855638, 412732.970775 4520801.259711, 412724.77772 4520774.268461, 412695.433778 4520691.593013, 412647.28695 4520535.418952, 412579.846274 4520370.491828, 412497.994223 4520212.221671, 412489.204459 4520198.399368, 412549.490919 4520117.201011, 412566.513956 4520090.279211, 412592.541703 4520061.691342, 412719.864904 4519887.256561, 412764.719144 4519818.270152, 412865.199261 4519645.393079, 412947.914827 4519463.346735, 413012.039043 4519273.950798, 413056.930944 4519079.098409, 413082.141805 4518880.737252, 413083.554287 4518827.242258, 413089.836306 4518816.095034, 413095.329957 4518807.590044, 413098.578485 4518802.010985, 413097.972289 4518801.658015, 413168.369973 4518676.739776, 413242.366769 4518512.380739, 413280.151935 4518403.093934, 413415.595308 4518335.468533, 413592.049933 4518222.920349, 413755.776785 4518092.548397, 413904.98292 4517945.780358, 413907.249603 4517943.30434, 413983.009822 4517908.147788, 414154.342584 4517806.828486, 414261.56513 4517728.0569, 414309.809682 4517739.69027, 414506.488956 4517766.865632, 414704.893541 4517774.406031, 414830.704567 4517766.680624, 414774.606057 4517836.052736, 414665.388467 4518002.620663, 414573.280569 4518179.226131, 414540.584039 4518260.826118, 414492.072499 4518332.595241, 414398.730854 4518504.947065, 414359.508246 4518598.155802, 414312.677323 4518700.007692, 414210.958919 4518764.242195, 414063.530422 4518877.798787, 413927.29466 4519004.566602, 413803.431105 4519143.448138, 413693.012113 4519293.241021, 413660.956981 4519346.458124, 413574.755751 4519483.565153, 413477.901641 4519684.15279, 413460.906663 4519732.441878, 413403.031195 4519850.678906, 413385.811741 4519891.111356, 413313.390888 4520089.658852, 413262.32589 4520294.739943, 413233.186962 4520504.064598, 413226.299484 4520715.295398, 413241.740363 4520926.07364, 413244.151288 4520945.10869, 413278.635051 4521139.680691, 413332.151145 4521329.900095, 413404.177155 4521513.910007, 413417.018937 4521542.473306, 413443.647734 4521594.702246, 413488.139492 4521777.910026, 413566.75047 4521991.783819, 413572.511326 4522005.06649, 413591.101687 4522057.034764, 413593.486892 4522062.836186, 413681.407443 4522248.850478, 413787.973269 4522424.847821, 413912.056603 4522588.965663, 414034.411758 4522720.22904, 414068.364629 4522795.756373, 414079.148172 4522817.96032, 414164.084327 4522974.667393, 414164.316277 4522975.016956, 414216.193036 4523078.876682, 414223.528212 4523091.483158, 414324.894857 4523248.35454, 414440.453117 4523395.08598, 414502.559056 4523460.361211, 414527.141822 4523491.746686, 414594.063853 4523561.718347, 414594.482317 4523562.301434, 414725.547364 4523711.220078, 414870.720753 4523846.421764, 415023.010859 4523962.341617, 415096.230951 4524115.570508, 415194.461996 4524279.017251, 415307.81296 4524432.36566, 415385.077662 4524518.370251, 415407.962013 4524638.39982, 415451.423482 4524795.490421, 415453.860046 4524803.079323, 415510.335766 4524956.995866, 415579.228483 4525105.769529, 415583.079994 4525113.264869, 415674.586822 4525272.835997, 415677.063554 4525276.72847, 415745.531936 4525435.856584, 415841.755272 4525609.635256, 415851.367909 4525625.126588, 415927.302648 4525736.165127, 415888.404252 4525811.977367, 415862.90701 4525841.312624, 415747.571489 4526004.376515, 415649.075161 4526178.130905, 415568.400332 4526360.842937, 415506.351575 4526550.69042, 415463.547705 4526745.779998, 415440.415604 4526944.166038, 415437.185971 4527143.870029, 415453.891015 4527342.900319, 415490.364136 4527539.271973, 415546.241585 4527731.026569, 415620.966097 4527916.251736, 415713.792441 4528093.100215, 415823.794857 4528259.808293, 415949.408195 4528414.13828, 415968.124879 4528448.065646, 416082.963493 4528614.099162, 416213.955037 4528767.709875, 416325.967708 4528874.969605, 416270.601767 4528978.202173, 416193.697906 4529164.518835, 416135.938126 4529357.629969, 416097.909095 4529555.57414, 416079.997073 4529756.340825, 416082.383994 4529957.89083, 416105.045614 4530158.177009, 416147.751758 4530355.165048, 416162.601164 4530410.120839, 416168.331535 4530450.733899, 416179.222983 4530515.339804, 416223.272799 4530714.22824, 416287.325431 4530907.604186, 416370.716381 4531093.461512, 416467.961146 4531261.87214, 416464.524193 4531272.930021, 416427.772952 4531440.968207, 416405.5964 4531611.542783, 416398.158574 4531783.392032, 416398.151485 4531813.135472, 416409.622922 4532027.514837, 416444.007231 4532239.429503, 416500.908218 4532446.437676, 416509.242955 4532471.425638, 416583.362143 4532660.92531, 416612.722279 4532718.069231, 416683.014403 4532886.80707, 416694.562114 4532910.782536, 416781.681193 4533072.264262, 416883.232649 4533225.0824, 416998.361773 4533367.950754, 417126.099578 4533499.666869, 417265.370956 4533619.122154, 417415.003726 4533725.31121, 417429.589155 4533734.6867, 417598.392573 4533831.915331, 417775.854223 4533912.260606, 417960.290526 4533974.96029, 418149.951737 4534019.419551, 418343.038537 4534045.216604, 418537.719114 4534052.106712, 418676.693039 4534043.470527, 418687.841295 4534052.612351, 418693.945936 4534056.682333, 418749.133892 4534105.275296, 418815.599562 4534153.408217, 418852.949604 4534185.066008, 419013.105568 4534295.969532, 419183.291341 4534390.765773, 419252.780469 4534421.03174, 419351.171534 4534471.769725, 419400.107601 4534494.076686, 419582.159493 4534564.614584, 419652.954318 4534604.943905, 419674.39145 4534667.095609, 419756.775051 4534846.343064, 419856.416732 4535016.602406, 419939.579041 4535131.101611, 419933.347569 4535166.079894, 419917.993736 4535359.890631, 419921.530323 4535554.276419, 419943.92391 4535747.400392, 419984.962889 4535937.43761, 420044.259458 4536122.5923, 420121.253287 4536301.114825, 420215.216819 4536471.318223, 420325.262136 4536631.594142, 420450.349356 4536780.42804, 420589.296457 4536916.4135, 420740.790445 4537038.265515, 420903.399766 4537144.832634, 420953.809621 4537171.261644, 420980.393051 4537208.348454, 420996.331939 4537227.609571, 421130.971854 4537374.515975, 421093.17509 4537525.609318, 421071.071838 4537636.120446, 421050.560958 4537758.205369, 421031.062084 4537901.230297, 421013.11434 4538132.229253, 421009.217988 4538331.157636, 421010.076644 4538369.300646, 420995.346656 4538449.399111, 420968.809589 4538650.669681, 420962.813122 4538853.59356, 420975.813684 4539033.824389, 420948.352063 4539144.79134, 420919.43694 4539356.693439, 420913.314031 4539570.471581, 420930.053348 4539783.681288, 420955.225623 4539973.500926, 420961.152635 4540007.25282, 420961.464229 4540016.447857, 420977.130254 4540207.499459, 420982.842365 4540251.273574, 420985.149025 4540310.944423, 421011.200401 4540502.362162, 421055.59794 4540690.373554, 421117.927419 4540873.22448, 421197.607312 4541049.208967, 421293.894217 4541216.685105, 421405.889793 4541374.090366, 421532.549135 4541519.956181, 421672.690531 4541652.921643, 421825.006482 4541771.746204, 421988.075901 4541875.321247, 422160.377374 4541962.680432, 422340.303354 4542033.008711, 422400.226304 4542053.152888, 422506.821675 4542083.006978, 422510.947114 4542114.710211, 422554.690967 4542304.322594, 422616.65453 4542488.786404, 422632.016964 4542528.075009, 422709.295161 4542701.066005, 422802.596256 4542865.96813, 422911.082922 4543021.301475, 423033.78155 4543165.67201, 423169.590989 4543297.784088, 423317.292422 4543416.452076, 423331.474767 4543425.78573, 423355.859608 4543484.231097, 423448.995604 4543657.342178, 423558.675836 4543820.474047, 423665.953016 4543964.232829, 423821.087371 4544147.953851, 424082.615458 4544422.353303, 424177.606194 4544513.01303, 424256.992102 4544613.740296, 424280.269845 4544640.372397, 424407.128357 4544772.741773, 424545.57559 4544892.937853, 424694.448077 4544999.950546, 424852.494741 4545092.880553, 425018.387406 4545170.946918, 425049.360542 4545183.823168, 425234.318381 4545250.257547, 425424.903464 4545298.218519, 425619.275553 4545327.242986, 425682.941836 4545333.571598, 425857.489736 4545343.244378, 426032.21552 4545337.637928, 426113.437797 4545327.884423, 426265.279051 4545319.725495, 426345.938812 4545308.120395, 426437.311124 4545300.877917, 426649.694193 4545260.641936, 426856.494431 4545197.720053, 426871.503559 4545192.250974, 427072.778125 4545106.158399, 427263.437656 4544998.583653, 427305.201669 4544968.565084, 427375.8701 4544928.967767, 427543.275178 4544811.184841, 427697.764931 4544676.908284, 427837.721185 4544527.544552, 427961.677993 4544364.658127, 427975.8364 4544343.932191, 428015.688023 4544278.24576, 428022.289114 4544273.857424, 428124.495689 4544191.295929, 428205.042221 4544139.207539, 428343.852162 4544031.015815, 428359.133079 4544017.985229, 428505.434674 4543879.93463, 428516.685504 4543866.94497, 428657.40399 4543755.724313, 428801.345924 4543616.414708, 428930.630417 4543463.405015, 429043.960539 4543298.230169, 429140.199406 4543122.547139, 429218.381587 4542938.11831, 429277.722788 4542746.7938, 429317.627722 4542550.492902, 429337.696078 4542351.18483, 429337.71138 4542250.554192, 429340.428058 4542220.239511, 429344.265949 4542127.242233, 429341.254152 4541907.556779, 429314.163842 4541689.527229, 429307.537904 4541661.671373, 429485.129038 4541679.543847, 429491.667029 4541679.869729, 429682.188802 4541680.280233, 429871.885173 4541662.560159, 430059.03471 4541626.870309, 430241.93909 4541573.53456, 430247.681257 4541571.558831, 430319.725743 4541542.469506, 430349.699571 4541550.615634, 430488.418834 4541583.05809, 430531.155443 4541591.459873, 430737.767826 4541620.980251, 430946.331613 4541628.80816, 430982.062436 4541628.283361, 431232.005212 4541608.898823, 431266.920929 4541603.974324, 431336.419293 4541590.623672, 431393.329079 4541582.944512, 431394.030098 4541585.536168, 431453.190241 4541768.757251, 431529.694082 4541945.440726, 431558.162078 4542003.368012, 431668.602151 4542199.39871, 431759.829073 4542325.677448, 431806.53937 4542419.595113, 431810.312568 4542425.61402, 431813.569741 4542433.236537, 431837.847528 4542483.853246, 431940.703738 4542671.768934, 432063.06901 4542847.605354, 432093.160331 4542886.253505, 432128.657509 4542940.159705, 432240.121197 4543093.142689, 432365.547995 4543234.903282, 432503.814454 4543364.171737, 432546.559139 4543400.5007, 432682.833114 4543506.538726, 432827.745437 4543600.427373, 432980.21598 4543681.466826, 432984.466167 4543683.495606, 433034.795965 4543713.280474, 433199.014684 4543791.280992, 433369.637924 4543854.047054, 433545.25583 4543901.060027, 433625.736111 4543918.72779, 433663.554742 4543934.529505, 433846.197813 4543989.620774, 434017.908061 4544055.59685, 434060.465947 4544077.826554, 434225.450007 4544154.66192, 434226.057539 4544154.911883, 434411.598062 4544220.771747, 434602.715053 4544268.069772, 434797.556453 4544296.347609, 434994.234113 4544305.331226, 435190.842088 4544294.933563, 435385.475109 4544265.255383, 435576.247046 4544216.584288, 435761.309184 4544149.391935, 435938.868141 4544064.329464, 435951.621114 4544056.593798, 436078.076654 4544089.623367, 436277.24808 4544120.674341, 436478.53349 4544131.518886, 436679.888153 4544122.046838, 436879.266638 4544092.354419, 437074.643588 4544042.743255, 437264.034294 4543973.717313, 437308.682649 4543952.131389, 437418.604241 4543963.695942, 437574.749638 4543967.866215, 437641.018894 4543967.047157, 437850.157249 4543953.480739, 438056.7277 4543918.103517, 438108.032678 4543906.521168, 438285.767031 4543857.689515, 438385.305754 4543820.186243, 438543.99827 4543813.559105, 438733.449906 4543787.363365, 438919.533162 4543743.191417, 439100.546393 4543681.447191, 439274.834317 4543602.695311, 439440.803152 4543507.655926, 439596.935191 4543397.198126, 439741.802679 4543272.331997, 439874.08087 4543134.199382, 439992.560141 4542984.063438, 440096.157054 4542823.29709, 440183.924265 4542653.370471, 440255.059182 4542475.837481, 440273.676116 4542422.05892, 440335.397246 4542204.773139, 440366.427201 4542066.182921, 440373.563984 4542032.988583, 440407.452139 4541868.590941, 440435.824006 4541761.177041, 440496.831869 4541533.917133, 440533.856524 4541368.192352, 440560.635506 4541218.771339, 440581.123978 4541119.99554, 440601.07155 4540959.436757, 440605.435093 4540907.077091, 440611.481253 4540682.227281, 440602.695796 4540579.894213, 440598.442739 4540418.313064, 440577.040995 4540237.12214, 440539.21632 4540058.635502, 440485.283493 4539884.338526, 440415.691345 4539715.681718, 440331.019025 4539554.068649, 440318.802111 4539533.132775, 440207.642707 4539363.109461, 440079.810001 4539205.238818, 439936.622725 4539061.149455, 439779.558012 4538932.327809, 439653.315083 4538848.655138, 439634.394446 4538811.890726, 439530.620149 4538650.447759, 439411.84949 4538499.694761, 439279.176137 4538361.019899, 439133.821776 4538235.700124, 439048.331258 4538175.244144, 439069.291637 4538125.410928, 439147.829773 4537912.217123, 439216.488719 4537685.139202, 439258.328318 4537509.828015, 439288.715457 4537356.038041, 439311.857897 4537208.774426, 439332.224882 4537022.818, 439335.128516 4536835.772083, 439330.918037 4536701.131432, 439314.154434 4536497.846857, 439276.772542 4536297.326956, 439219.161185 4536101.657417, 439141.919604 4535912.87348, 439045.851218 4535732.938764, 438931.955275 4535563.724843, 438914.475239 4535540.4157, 438777.556911 4535376.804816, 438711.467391 4535313.070045, 438692.242575 4535265.275554, 438604.722284 4535096.201267, 438501.522278 4534936.214784, 438383.577704 4534786.765819, 438251.957312 4534649.2086, 438175.646999 4534583.32227, 438153.404103 4534559.620302, 438005.876642 4534430.471309, 437846.412158 4534316.388478, 437676.543257 4534218.468252, 437497.902541 4534137.651738, 437420.386997 4534107.067195, 437242.494703 4534046.372997, 437059.690234 4534002.646801, 436873.588185 4533976.274814, 436685.832279 4533967.489962, 436498.080842 4533976.369837, 436311.992164 4534002.836008, 436129.209849 4534046.654716, 435951.348295 4534107.438939, 435779.978441 4534184.651809, 435616.613887 4534277.611352, 435462.697529 4534385.496517, 435390.094362 4534441.653642, 435227.097011 4534582.385602, 435080.175519 4534739.826689, 434951.033205 4534912.151626, 434931.827088 4534940.882334, 434904.207889 4534987.425612, 434892.528187 4534968.877783, 434771.138509 4534812.758294, 434634.924092 4534669.390302, 434485.216729 4534540.175542, 434329.116272 4534418.373756, 434178.826914 4534311.865704, 434019.375826 4534219.636604, 433852.115587 4534142.468809, 433678.465017 4534081.016911, 433499.897145 4534035.802188, 433490.758827 4534033.931409, 433299.430226 4534004.328072, 433106.135749 4533993.36284, 432912.68671 4534001.138466, 432858.441532 4534008.61765, 432845.353151 4534009.20118, 432673.546606 4534031.877635, 432598.005193 4534045.200316, 432410.839498 4534087.557712, 432228.59484 4534147.657888, 432052.949017 4534224.947544, 431968.088362 4534272.472966, 431911.346335 4534237.365651, 431900.436434 4534231.495215, 431765.313637 4534165.21832, 431749.419471 4534158.151294, 431531.005632 4534075.939013, 431520.059948 4534072.533604, 431350.044734 4534027.732137, 431250.584744 4534010.687892, 431229.837525 4533924.376794, 431171.045602 4533751.241979, 431096.687533 4533584.199973, 431007.384804 4533424.646919, 430990.50132 4533397.475926, 430890.284523 4533251.100841, 430777.491595 4533114.181787, 430653.009908 4532987.795944, 430633.485708 4532971.208191, 430561.333951 4532884.739972, 430553.696477 4532876.50925, 430384.027904 4532713.954056, 430196.46535 4532572.419947, 430167.519754 4532553.137209, 429991.827065 4532448.647948, 429806.386375 4532362.6382, 429688.607758 4532322.028971, 429628.594145 4532230.150594, 429508.184933 4532079.716716, 429373.857964 4531941.568262, 429226.860085 4531816.987552, 429068.555756 4531707.130967, 428900.414388 4531613.018216, 428723.996698 4531535.522869, 428540.940229 4531475.364254, 428352.944144 4531433.100774, 428161.753457 4531409.124725, 427969.142834 4531403.658658, 427776.900123 4531416.75331, 427617.144484 4531443.254948, 427600.774405 4531389.127876, 427527.775575 4531211.429254, 427438.064502 4531041.554144, 427332.468898 4530881.069883, 427211.963032 4530731.457165, 427077.658738 4530594.096376, 426930.795164 4530470.254864, 426772.727332 4530361.075241, 426604.913641 4530267.564843, 426429.080289 4530190.66423, 426348.444209 4530115.184851, 426253.752487 4530044.199928, 426211.66598 4529975.97714, 426159.914733 4529899.647251, 426037.633418 4529737.643344, 425945.539003 4529638.409241, 425918.152097 4529537.191079, 425858.352369 4529338.346721, 425834.682549 4529273.363928, 425818.687553 4529158.917927, 425768.673725 4528957.067341, 425697.970775 4528761.501151, 425607.34309 4528574.333674, 425583.317803 4528530.661873, 425490.572577 4528378.53886, 425384.657237 4528235.273272, 425314.807303 4528156.546963, 425306.436965 4528119.508103, 425293.330935 4528039.599339, 425292.00022 4528033.14062, 425248.83474 4527862.160064, 425190.775916 4527695.646455, 425118.275121 4527534.894336, 425106.743079 4527512.067369, 425113.27412 4527411.628699, 425114.056438 4527350.125703, 425106.278244 4527146.651677, 425077.851262 4526945.023091, 425029.070154 4526747.329937, 424960.440562 4526555.621411, 424951.009143 4526535.877042, 424958.983332 4526417.247156, 424955.638878 4526311.306705, 424995.530673 4526192.617105, 425038.552899 4526008.663868, 425107.205293 4525636.671049, 425120.976532 4525533.578639, 425155.965931 4525452.693164, 425214.491151 4525272.034648, 425255.618201 4525086.639754, 425278.812641 4524952.169234, 425314.684087 4524987.940521, 425460.571976 4525108.20733, 425617.164679 4525214.160656, 425783.062749 4525304.853611, 425956.783583 4525379.475684, 426136.774663 4525437.359991, 426149.174755 4525440.088389, 426248.708939 4525555.208776, 426315.461187 4525625.05229, 426410.002935 4525713.355923, 426441.761303 4525776.571119, 426479.146312 4525850.978381, 426515.780198 4525923.872797, 426616.373915 4526100.945008, 426734.453202 4526266.869526, 426868.793764 4526419.925977, 427018.002701 4526558.527409, 427180.532953 4526681.236743, 427354.69934 4526786.781679, 427538.696031 4526874.067882, 427730.615273 4526942.190333, 427928.467167 4526990.442711, 428130.200301 4527018.324714, 428333.723024 4527025.54725, 428536.925127 4527012.035433, 428688.112926 4526994.214494, 428926.86745 4526951.257709, 429158.664852 4526879.710717, 429202.033964 4526863.383065, 429290.197064 4526848.31619, 429480.883548 4526795.915485, 429532.064941 4526776.234758, 429581.753774 4526785.924022, 429611.598893 4526790.579471, 429634.236385 4526794.115535, 429833.418345 4526815.078702, 430033.698224 4526816.015489, 430233.067569 4526796.916501, 430429.527061 4526757.973267, 430621.106559 4526699.57632, 430805.884859 4526622.311276, 430982.008964 4526526.952967, 431147.712661 4526414.457669, 431301.334235 4526285.953508, 431441.333135 4526142.729155, 431566.30542 4525986.220895, 431674.99784 4525817.998229, 431766.320401 4525639.748132, 431837.573889 4525481.625178, 431846.937784 4525460.520802, 431890.72923 4525360.266477, 431896.811252 4525345.776769, 432060.858065 4525246.084065, 432216.818251 4525129.092584, 432353.253435 4525004.23735, 432500.528473 4524948.383883, 432552.776223 4524925.941394, 432723.332079 4524842.889267, 432885.251986 4524744.051525, 433037.079195 4524630.317385, 433177.447754 4524502.710084, 433187.1756 4524492.015499, 433302.511425 4524423.30576, 433360.802492 4524384.909661, 433361.737898 4524384.645243, 433550.098321 4524310.105485, 433729.95237 4524216.894189, 433899.45493 4524105.967606, 434056.867081 4523978.463727, 434200.573939 4523835.690608, 434329.101222 4523679.112953, 434441.130375 4523510.337085, 434535.512094 4523331.094469, 434611.278122 4523143.223945, 434667.651179 4522948.652871, 434704.052936 4522749.377341, 434720.109948 4522547.441716, 434715.657489 4522344.917643, 434710.935116 4522280.026989, 434711.469457 4522222.942029, 434693.605133 4522025.050017, 434656.192996 4521829.907211, 434599.602306 4521639.43969, 434524.39162 4521455.527387, 434431.303273 4521279.985533, 434321.256058 4521114.546744, 434195.336149 4520960.843916, 434054.78639 4520820.394111, 433900.99402 4520694.583581, 433735.476983 4520584.654089, 433559.868949 4520491.69065, 433375.903186 4520416.610821, 433241.100216 4520376.663229, 433059.854162 4520303.937424, 433021.098181 4520290.825827, 432945.275012 4520269.100473, 432940.813983 4520258.558345, 432925.609657 4520230.567087, 433119.494735 4520067.233369, 433204.52965 4519995.606562, 433211.191863 4519989.99436, 433368.329692 4519842.43349, 433508.673748 4519678.817924, 433630.593707 4519501.048322, 433732.67327 4519311.189768, 433813.726616 4519111.447778, 433846.931344 4519015.001419, 433906.563472 4518805.287479, 433943.013565 4518590.328603, 433955.848451 4518372.67936, 433951.060457 4518277.315364, 433969.34324 4518145.43555, 433975.89672 4517931.327511, 433971.651505 4517875.983956, 434017.468421 4517741.775768, 434072.706002 4517550.364607, 434117.133899 4517362.967657, 434143.331216 4517172.166307, 434151.055028 4516979.729831, 434140.233714 4516787.442666, 434110.967618 4516597.087865, 434063.528121 4516410.430562, 433998.355123 4516229.201604, 433916.052963 4516055.081504, 433817.38482 4515889.684853, 433703.265629 4515734.545352, 433574.753602 4515591.101588, 433433.040413 4515460.683695, 433279.440149 4515344.501022, 433115.377125 4515243.630913, 432942.372674 4515159.008724, 432762.031044 4515091.419146, 432576.024518 4515041.488926, 432546.481014 4515035.065706, 432366.468899 4515004.458282, 432184.415532 4514990.396002, 432080.78284 4514991.871834, 432064.463432 4514986.707227, 432089.278944 4514827.610293, 432100.77559 4514642.885899, 432100.997804 4514628.884575, 432097.397901 4514527.430485, 432144.038038 4514442.455125, 432220.354741 4514264.493646, 432279.104174 4514079.986108, 432313.126387 4513921.45812, 432327.292987 4513861.705691, 432353.761157 4513663.573924, 432360.319405 4513463.789664, 432346.90222 4513264.348595, 432335.560244 4513197.130857, 432325.840918 4513112.704069, 432286.848876 4512928.622753, 432282.663864 4512912.620226, 432228.031743 4512737.106806, 432175.458168 4512610.543705, 432167.399144 4512577.440657, 432104.394427 4512396.30142, 432084.528338 4512353.060252, 432091.702014 4512240.649567, 432084.87212 4512043.964835, 432058.744632 4511848.9036, 432013.572539 4511657.354616, 431949.793238 4511471.17263, 431899.471613 4511361.006287, 431867.96528 4511284.257139, 431844.966507 4511234.761183, 431766.365951 4511082.943361, 431734.849748 4511033.033777, 431672.64188 4510918.852662, 431554.218551 4510746.962761, 431418.524927 4510588.351717, 431267.039059 4510444.747208, 431101.411016 4510317.713455, 431078.128578 4510301.714095, 430933.645657 4510211.242609, 430781.983196 4510133.40366, 430736.391678 4510112.408773, 430514.792441 4510025.936131, 430284.494002 4509966.38474, 430182.425574 4509946.380288, 429990.984253 4509918.395859, 429846.575773 4509904.378874, 429843.483497 4509904.17753, 429790.613403 4509729.282622, 429713.439099 4509543.702232, 429708.772069 4509533.900134, 429662.046801 4509435.704954, 429570.69953 4509265.454313, 429463.350747 4509104.812339, 429341.002275 4508955.278208, 429204.795918 4508818.247433, 429056.00281 4508694.998839, 428896.011547 4508586.682632, 428726.315232 4508494.309662, 428548.497539 4508418.741991, 428364.217933 4508360.684847, 428307.125493 4508345.687323, 428159.429323 4508316.95099, 428107.609657 4508304.132953, 427985.532876 4508249.376235, 427808.074388 4508189.011296, 427625.743964 4508145.525013, 427440.143167 4508119.299363, 427252.902289 4508110.564708, 427234.308136 4508110.569595, 427122.349046 4508117.409945, 427068.843556 4508117.138126, 427024.970071 4508119.134743, 426888.577132 4508132.394797, 426835.156514 4508127.833922, 426631.160777 4508131.279037, 426428.577471 4508155.489236, 426229.514786 4508200.212574, 426036.044274 4508264.983637, 425850.179292 4508349.128382, 425673.854051 4508451.771155, 425597.179796 4508507.584729, 425493.653637 4508481.011852, 425304.539467 4508451.364244, 425113.457134 4508439.932191, 425077.616743 4508439.506302, 425045.51953 4508440.653357, 425043.552361 4508440.314674, 425033.686426 4508439.149167, 424918.610991 4508428.914778, 424890.078365 4508427.206016, 424692.140843 4508425.165343, 424682.97434 4508425.524835, 424486.496682 4508442.964678, 424292.692497 4508479.673752, 424270.105892 4508486.312189, 424202.775528 4508443.809569, 424028.047722 4508356.086787, 423845.589594 4508285.843465, 423657.144763 4508233.750869, 423464.51406 4508200.30681, 423269.538317 4508185.830887, 423074.080775 4508190.461437, 422880.00928 4508214.154208, 422860.597242 4508218.480377, 422785.284673 4508186.421106, 422597.265593 4508127.458626, 422404.356904 4508087.28418, 422208.431158 4508066.287739, 422011.390194 4508064.673114, 421956.835093 4508069.616696, 421775.082373 4508063.487921, 421622.433147 4508066.87583, 421358.106117 4508090.351634, 421285.923572 4508101.628305, 421094.222127 4508141.273232, 420907.314715 4508199.469308, 420726.991962 4508275.658999, 420649.747501 4508317.625939, 420639.964877 4508320.912671, 420460.110519 4508391.172542, 420384.01902 4508425.217778, 420190.751229 4508503.219679, 420098.395442 4508552.313798, 420016.601031 4508508.305926, 419983.516984 4508492.136059, 419820.100859 4508421.101276, 419651.010837 4508364.893317, 419520.783565 4508327.958355, 419297.105842 4508278.164618, 419258.522086 4508271.869787, 419064.62462 4508249.881753, 418869.507279 4508246.89445, 418675.027564 4508262.936318, 418483.036909 4508297.854639, 418295.363049 4508351.316994, 418113.792627 4508422.814424, 417940.054178 4508511.666281, 417466.318524 4508783.878541, 417289.344667 4508774.343105, 417223.643099 4508777.240663, 417047.492518 4508774.867348, 416860.163118 4508789.985953, 416675.079912 4508822.62157, 416493.877226 4508872.486019, 416318.15512 4508939.138986, 416149.465258 4509021.99191, 415989.297209 4509120.313182, 415839.065291 4509233.234603, 415700.096086 4509359.759054, 415573.616721 4509498.769294, 415507.592139 4509578.566024, 415436.300395 4509670.000374, 415372.909116 4509756.351782, 415286.283187 4509888.061847, 415265.999573 4509912.582832, 415251.12383 4509934.85168, 415225.450893 4509933.826813, 415030.754872 4509945.063432, 414924.374288 4509961.707374, 414886.99809 4509956.298036, 414692.669679 4509947.270539, 414498.383508 4509957.165508, 414305.977767 4509985.889325, 414117.272856 4510033.170226, 413934.054162 4510098.560875, 413758.055163 4510181.442593, 413590.94103 4510281.031215, 413434.292875 4510396.384508, 413289.592784 4510526.411085, 413158.209804 4510669.880731, 413043.917651 4510822.066331, 412981.469681 4510839.801223, 412975.809302 4510840.752417, 412975.60377 4510840.048107, 412969.634521 4510841.790054, 412923.557954 4510849.53296, 412687.978052 4510883.550005, 412645.439417 4510890.160573, 412620.391288 4510894.329654, 412432.159786 4510935.059502, 412248.718458 4510993.705031, 412071.768265 4511069.722449, 411902.949978 4511162.406885, 411894.737809 4511168.006114, 411862.786157 4511184.533091, 411781.1611 4511221.650496, 411608.631349 4511321.953607, 411596.714138 4511329.702249, 411588.630053 4511334.960138, 411584.650895 4511337.83384, 411578.270972 4511335.271711, 411442.283306 4511286.288532, 411430.241676 4511282.436679, 411393.076115 4511270.945448, 411373.988964 4511265.246661, 411273.076012 4511237.968464, 411264.220419 4511235.821354, 411056.11851 4511196.895422, 410845.067781 4511180.185456, 410840.406652 4511180.06397, 410651.491857 4511184.069403, 410463.798214 4511205.885443, 410279.001116 4511245.317357, 410098.750101 4511302.013167, 409924.654128 4511375.466793, 409894.226206 4511391.84426, 409854.230215 4511313.110796, 409742.015711 4511139.374171, 409729.370966 4511121.855868, 409614.999758 4510977.849362, 409487.884748 4510844.956843, 409349.10065 4510724.301875, 409199.820837 4510616.904553, 409189.260378 4510610.020925, 409066.262898 4510507.176355, 409033.557253 4510482.880121, 408881.044009 4510380.114748, 408719.735998 4510291.792965, 408550.997121 4510218.661556, 408376.254108 4510161.338863, 408196.984455 4510120.309567, 408014.703933 4510095.920579, 407964.75425 4510093.870275, 407883.528058 4510078.462365, 407664.063127 4510061.453496, 407631.169087 4510060.72022, 407459.334582 4510064.27645, 407288.439895 4510082.57262, 407259.05496 4510087.002775, 407055.064148 4510128.717576, 406856.515651 4510191.414233, 406665.561359 4510274.413236, 406567.750451 4510329.661648, 406482.270064 4510374.007935, 406304.064746 4510492.175716, 406139.493386 4510628.693215, 405990.437066 4510782.00001, 405860.796647 4510930.450796, 405843.104129 4510950.989738, 405580.103403 4511260.520513, 405485.159258 4511353.439832, 405361.6929 4511486.979114, 405249.024267 4511620.033989, 405148.37176 4511762.39583, 405131.977165 4511787.871509, 405027.884863 4511969.94065, 404943.430788 4512161.909106, 404879.543605 4512361.665976, 404870.584943 4512395.74142, 404838.141928 4512540.893088, 404816.575592 4512688.054391, 404798.575646 4512853.575794, 404788.599002 4512986.257502, 404783.635611 4513104.984138, 404784.010346 4513280.586755, 404789.634139 4513342.929791, 404738.424109 4513322.142609, 404529.347395 4513262.729869, 404410.855942 4513235.921245, 404221.992505 4513202.61802, 404030.807606 4513187.556927, 403839.059117 4513190.876446, 403648.510093 4513212.546056, 403460.912563 4513252.366513, 403277.991414 4513309.971684, 403101.428538 4513384.831909, 402932.847365 4513476.258877, 402773.797936 4513583.411952, 402625.74265 4513705.3059, 402490.042821 4513840.819954, 402367.946157 4513988.708111, 402260.575292 4514147.610596, 402168.917461 4514316.06636, 402093.815423 4514492.526514, 402035.959713 4514675.368575, 401995.882292 4514862.911377, 401973.951658 4515053.430536, 401970.369455 4515245.174297, 401985.168619 4515436.379651, 401985.286688 4515437.054627))'
+where wikidata_id='Q1324805';
+
+update parc --Parque Nacional De Cabaneros
+set area='POLYGON ((353826.891821 4380824.976217, 353868.586558 4381083.17458, 353907.128588 4381266.700279, 353962.690476 4381445.809314, 354034.783733 4381618.926998, 354122.774531 4381784.531314, 354225.889271 4381941.166305, 354343.221391 4382087.454868, 354473.739331 4382222.110864, 354616.295605 4382343.950426, 354988.870188 4382633.288648, 355140.17754 4382739.945186, 355180.93734 4382763.359267, 355277.84293 4382930.929431, 355392.98796 4383091.192156, 355523.366241 4383239.327308, 355667.708457 4383373.892697, 355824.609346 4383493.578244, 355992.541378 4383597.218736, 356169.869631 4383683.805167, 356354.867702 4383752.494563, 356545.734517 4383802.618189, 356660.011332 4383826.671786, 356692.443732 4383831.853155, 356753.848413 4383874.299337, 356921.231059 4383967.697044, 356941.469736 4383977.749961, 357133.562073 4384060.933941, 357333.296768 4384123.584498, 357368.003587 4384130.592338, 357498.879778 4384198.779974, 357708.36583 4384293.048105, 357927.279765 4384362.672643, 357985.391034 4384377.53982, 358146.015562 4384411.675471, 358187.4047 4384416.97186, 358236.435693 4384426.88454, 358431.276119 4384456.371286, 358628.07257 4384466.54068, 358824.914533 4384457.293998, 359019.891054 4384428.721007, 359063.82177 4384420.053627, 359161.03336 4384436.622013, 359358.607632 4384450.424374, 359556.578289 4384444.617692, 359753.003925 4384419.25891, 359945.958287 4384374.596709, 360133.549165 4384311.069071, 360313.936944 4384229.298981, 360327.968675 4384221.177804, 360396.037256 4384199.450887, 360574.800368 4384122.537557, 360745.24214 4384028.61465, 360905.748835 4383918.571426, 361054.800778 4383793.449771, 361190.986749 4383654.434335, 361304.90379 4383526.227008, 361443.521282 4383351.497434, 361473.646642 4383303.348585, 361524.372408 4383352.842432, 361687.676273 4383481.947745, 361863.515474 4383593.37893, 362049.984957 4383685.928734, 362104.998463 4383706.42087, 362158.621871 4383732.625866, 362346.624074 4383802.166946, 362540.643066 4383852.539765, 362738.729887 4383883.238318, 362938.894718 4383893.954232, 363139.126861 4383884.579865, 363337.414947 4383855.209382, 363524.971336 4383807.853672, 363584.537707 4383819.445326, 363763.619883 4383845.947935, 363944.364891 4383856.148723, 364125.291851 4383849.964115, 364304.91839 4383827.444782, 364698.261752 4383759.928572, 364879.384259 4383720.116103, 365056.040585 4383663.698572, 365294.392164 4383575.203909, 365380.566774 4383538.465552, 365420.480404 4383525.392618, 365618.51138 4383449.371592, 365807.518139 4383365.358372, 365986.837221 4383262.273735, 366154.55073 4383141.220214, 366308.864895 4383003.492532, 366448.129257 4382850.563746, 366558.152158 4382716.421508, 366636.283323 4382614.67478, 366719.083377 4382499.37309, 366823.547679 4382338.075199, 366859.693933 4382268.406364, 366968.822436 4382193.897406, 367114.752315 4382072.466172, 367169.811096 4382017.011532, 367282.784905 4381943.155871, 367432.25886 4381823.574964, 367569.616141 4381690.251921, 367665.749712 4381577.167335, 367715.020121 4381526.986296, 367836.811434 4381376.153057, 367943.427084 4381214.236742, 368033.865316 4381042.758708, 368107.276377 4380863.330154, 368124.027087 4380807.48059, 368147.094523 4380788.15003, 368281.541105 4380651.545904, 368402.294026 4380502.699328, 368418.99143 4380477.527678, 368579.611209 4380368.986211, 368741.144698 4380232.951341, 368887.433528 4380080.642009, 369016.846629 4379913.75641, 369153.637183 4379716.689368, 369288.826176 4379491.729581, 369339.003127 4379394.269698, 369423.120858 4379208.089888, 369487.806222 4379014.300007, 369532.384249 4378814.922189, 369556.38978 4378612.036879, 369556.783872 4378606.135064, 369654.272506 4378494.898064, 369769.790957 4378404.40983, 369909.088049 4378271.835234, 370035.008867 4378126.495456, 370146.389281 4377969.73415, 370242.199588 4377803.000565, 370321.554029 4377627.836138, 370383.718977 4377445.860253, 370415.81331 4377334.70436, 370435.867085 4377250.123982, 370474.290782 4377146.068142, 370524.310585 4376953.594785, 370554.968509 4376757.105434, 370565.96144 4376558.542776, 370557.180691 4376359.87, 370528.713077 4376163.051382, 370480.840057 4375970.032865, 370414.034952 4375782.722824, 370398.50922 4375749.92013, 370351.916462 4375580.715995, 370285.64644 4375405.844928, 370203.332939 4375237.928003, 370105.695618 4375078.433302, 370046.719603 4374999.692689, 370033.995767 4374859.670737, 369998.131655 4374670.202655, 369944.187675 4374485.069093, 369872.665295 4374305.99107, 369808.446791 4374165.301502, 369732.15644 4374015.228582, 369659.658296 4373886.349076, 369653.029868 4373875.779264, 369660.102082 4373870.987967, 369808.910091 4373747.636727, 369945.116091 4373610.497099, 370067.447939 4373460.849944, 370174.763077 4373300.092944, 370266.059197 4373129.727541, 370340.483609 4372951.344922, 370397.341201 4372766.611151, 370436.100933 4372577.251611, 370440.13652 4372539.039165, 370469.558561 4372430.019298, 370478.06314 4372389.785621, 370487.831765 4372329.003214, 370497.016926 4372314.69988, 370587.351928 4372133.948668, 370591.976086 4372126.666841, 370674.837944 4371965.616825, 370693.53155 4371924.844907, 370747.630289 4371794.706379, 370777.156278 4371750.682875, 370804.255812 4371706.205871, 370852.497632 4371616.379126, 370907.404586 4371540.427853, 370937.103562 4371494.875186, 370976.986216 4371426.586384, 371094.608458 4371370.217549, 371258.23089 4371271.589475, 371411.696143 4371157.79926, 371553.603856 4371029.885233, 371682.659127 4370889.014604, 371791.264104 4370758.459102, 371847.076187 4370688.22035, 371954.599999 4370546.489436, 372244.116678 4370333.285143, 372475.83143 4370188.380312, 372676.778798 4370044.724763, 372872.662739 4369885.527713, 373266.402788 4369615.301076, 373429.820326 4369490.312151, 373579.532856 4369349.196307, 373713.956137 4369193.446814, 373831.667718 4369024.711795, 373996.298253 4368760.754337, 374089.221786 4368594.654663, 374165.935945 4368420.474232, 374225.746008 4368239.790416, 374268.110336 4368054.239485, 374292.645281 4367865.50178, 374299.128655 4367675.286506, 374287.501743 4367485.316246, 374257.869839 4367297.311366, 374210.501289 4367112.974432, 374145.82506 4366933.974795, 374064.42686 4366761.93347, 374036.280318 4366714.669962, 374051.235191 4366642.066463, 374071.820326 4366442.379638, 374072.283954 4366241.635122, 374052.621402 4366041.855344, 374045.864245 4366008.265984, 374152.6387 4365971.830829, 374333.154722 4365889.457868, 374504.620101 4365789.603161, 374665.347132 4365673.249562, 374813.753806 4365541.542318, 374901.85439 4365446.152279, 374996.609219 4365375.753079, 375052.336547 4365352.844282, 375180.703435 4365291.872723, 375188.142239 4365288.267849, 375367.027706 4365230.466188, 375558.569939 4365145.538504, 375740.175993 4365041.037884, 375909.852689 4364918.111252, 376065.737779 4364778.107762, 376206.120379 4364622.563993, 376273.18708 4364530.464035, 376400.182412 4364474.530862, 376554.625674 4364389.54746, 376700.985831 4364291.294705, 376722.229711 4364275.632575, 376769.826951 4364255.835329, 376936.643123 4364177.243953, 377095.511723 4364083.622335, 377212.772712 4363999.064882, 377278.720682 4363975.481797, 377461.049751 4363888.652024, 377633.692921 4363783.877817, 377794.889954 4363662.227434, 377942.997311 4363524.941202, 378076.504918 4363373.418868, 378095.9679 4363346.228933, 378167.802936 4363302.002922, 378313.678586 4363192.704288, 378350.563138 4363162.348082, 378389.729472 4363135.858326, 378553.765943 4363012.17589, 378704.249163 4362872.31843, 378740.383397 4362831.054191, 378740.92624 4362830.941441, 378918.450606 4362776.479586, 378973.663345 4362753.748691, 379163.192973 4362711.043117, 379380.898496 4362634.759728, 379390.01642 4362630.961232, 379461.137623 4362617.539371, 379491.367199 4362611.593016, 379974.647603 4362512.65627, 381023.841117 4362297.958525, 381202.894112 4362261.340387, 381823.725483 4362147.642387, 381965.493061 4362156.339643, 382139.202066 4362159.436175, 382312.524395 4362147.445458, 382484.152139 4362120.457975, 382652.790179 4362078.677376, 383010.053717 4361973.499243, 383174.716881 4361936.510421, 383331.92064 4361894.41088, 383485.181076 4361839.669377, 383911.463078 4361667.54877, 384104.934662 4361577.1346, 384287.662858 4361466.606855, 384457.564291 4361337.225718, 384612.701833 4361190.466325, 384754.650402 4361041.036511, 384778.01865 4361013.591815, 385332.695885 4360623.350971, 385481.9813 4360507.399903, 385766.773162 4360263.774546, 385827.571492 4360206.426014, 385836.21203 4360207.732811, 386039.87138 4360226.842548, 386233.110998 4360235.579024, 386426.290778 4360225.606657, 386617.603627 4360197.018734, 386805.259915 4360150.08268, 386987.504218 4360085.237557, 387162.631735 4360003.089956, 387346.206076 4359905.884671, 387363.94676 4359925.509185, 387504.086142 4360053.67045, 387655.749354 4360167.962296, 387817.568987 4360267.354258, 387988.086062 4360350.950209, 388165.763181 4360417.996441, 388348.998392 4360467.888459, 388411.984202 4360478.755568, 388490.925603 4360527.819362, 388657.680452 4360611.03632, 388831.457309 4360678.370156, 389010.74726 4360729.236206, 389188.528512 4360770.831708, 389493.739828 4360862.268998, 389696.317283 4360911.613176, 389902.931071 4360939.599171, 390111.335688 4360945.922827, 390319.266169 4360930.515418, 390524.462701 4360893.544394, 390598.579998 4360876.158265, 390831.35328 4360864.596551, 391014.354147 4360847.047264, 391194.970469 4360812.768416, 391371.676158 4360762.049639, 391542.978172 4360695.319474, 392005.983301 4360489.974692, 392020.96952 4360483.254467, 392115.682727 4360440.314551, 392152.631489 4360443.64175, 392224.833243 4360447.914999, 392419.42337 4360449.947853, 392613.289931 4360433.059812, 392804.597524 4360397.410762, 392991.534969 4360343.338205, 393172.332461 4360271.354065, 393345.278326 4360182.139843, 393508.735222 4360076.540161, 393661.155644 4359955.55477, 393801.096572 4359820.329083, 393927.233134 4359672.14333, 394038.371151 4359512.40044, 394133.458438 4359342.612757, 394211.594769 4359164.387721, 394272.0404 4358979.412654, 394314.223069 4358789.438781, 394337.743419 4358596.264656, 394342.378773 4358401.719126, 394328.085248 4358207.644025, 394296.683472 4358025.6445, 394288.471318 4357944.708377, 394247.540116 4357745.63406, 394186.616584 4357551.74164, 394164.527277 4357492.204849, 394096.215484 4357330.282933, 394013.952928 4357174.982967, 393918.374782 4357027.504067, 393810.219034 4356888.984964, 393540.520896 4356573.218545, 393403.151701 4356427.789786, 393319.769792 4356347.925016, 393288.762716 4356320.950269, 393271.849726 4356193.109428, 393302.868125 4355221.854324, 393299.666166 4355028.142436, 393277.736542 4354835.649215, 393237.285033 4354646.180949, 393178.691221 4354461.51554, 393102.504929 4354283.385819, 393009.441062 4354113.463293, 392900.372897 4353953.342452, 392776.323891 4353804.525812, 392638.458073 4353668.409814, 392488.069128 4353546.271722, 392326.56825 4353439.257636, 392155.470905 4353348.371735, 391976.382608 4353274.466862, 391790.98386 4353218.236512, 391601.014373 4353180.20833, 391510.929526 4353171.109456, 391494.886129 4353131.994778, 391411.693981 4352954.485476, 391311.52319 4352785.973463, 391195.336158 4352628.077739, 391064.249167 4352482.315307, 390919.52165 4352350.086597, 390762.544094 4352232.662012, 390594.824682 4352131.169723, 390417.974797 4352046.58483, 390233.693546 4351979.719993, 390043.751433 4351931.217623, 389849.973351 4351901.543713, 389654.221047 4351890.983359, 389458.375233 4351899.63802, 389264.317522 4351927.424545, 389073.912349 4351974.075973, 388941.307161 4352020.735159, 388856.148498 4352012.843984, 388789.61142 4352012.491151, 388748.493583 4350726.689532, 388732.324124 4350528.946577, 388696.641979 4350333.778668, 388641.798293 4350143.106441, 388568.332781 4349958.806288, 388476.968411 4349782.691894, 388368.604294 4349616.496389, 388244.306832 4349461.855292, 388105.299231 4349320.290414, 387952.949453 4349193.194887, 385437.466986 4347298.126792, 385267.760387 4347183.41011, 385087.209924 4347086.653834, 384897.709582 4347008.872943, 384701.247231 4346950.883363, 384499.883774 4346913.293409, 384295.731525 4346896.497402, 384090.932054 4346900.671532, 383887.63372 4346925.772014, 381543.846899 4347337.944252, 381332.604389 4347387.031479, 381127.918763 4347458.702594, 380932.196765 4347552.11487, 380747.739739 4347666.169943, 379912.861788 4348247.239466, 379767.614634 4348358.528844, 379633.146641 4348482.627272, 379510.583376 4348618.495985, 379219.039117 4348973.03919, 379140.637412 4348979.857365, 378995.1073 4349003.413902, 378652.304191 4349071.954591, 378472.414041 4349116.682445, 378297.43763 4349177.873153, 378128.878052 4349255.001071, 377968.183277 4349347.40365, 377816.733716 4349454.287126, 377675.83036 4349574.733344, 377412.790857 4349821.57496, 377277.38367 4349967.780182, 377062.471856 4349964.364626, 376849.170477 4349972.366479, 376637.936677 4350003.055066, 376433.814269 4350043.935976, 376414.51052 4350040.06118, 376231.182305 4350020.577137, 376046.838844 4350018.057172, 375863.046541 4350032.522698, 375852.446175 4350034.350584, 375786.224474 4350034.161532, 375579.02604 4350044.328698, 375373.995351 4350075.903673, 375173.338259 4350128.546753, 375114.834842 4350150.590428, 375005.398319 4350093.123725, 374836.362029 4350014.188035, 374660.70608 4349951.346185, 374479.958861 4349905.144961, 374295.693057 4349875.986364, 374121.425915 4349856.689163, 373902.976928 4349844.539592, 373684.507928 4349856.323799, 373468.633308 4349891.900763, 373199.41254 4349951.555473, 373007.231725 4350004.309394, 372821.255134 4350075.927475, 372643.32935 4350165.698613, 372475.221017 4350272.731459, 372377.3418 4350349.743981, 372369.074113 4350351.020708, 372219.563189 4350360.345693, 372035.900941 4350380.350276, 371854.868225 4350417.217065, 371678.009792 4350470.631476, 371506.834777 4350540.137723, 371342.803814 4350625.14271, 371187.316582 4350724.92109, 371041.699851 4350838.621452, 370853.429181 4351000.163865, 370734.486701 4351073.67483, 370363.324742 4351202.013148, 370195.605813 4351268.620578, 369504.608342 4351579.829294, 369407.732215 4351628.247793, 369363.884648 4351605.253316, 369175.829437 4351529.785747, 369122.884366 4351514.545607, 369022.113289 4351473.1366, 368852.371368 4351420.444986, 368678.621814 4351383.030833, 368463.738058 4351346.664766, 368253.720257 4351322.454475, 368042.320207 4351320.548202, 367831.899966 4351340.967246, 367624.810645 4351383.483457, 367423.366136 4351447.621784, 367314.076387 4351495.642809, 367301.699776 4351498.984051, 367193.025395 4351488.056033, 367141.944278 4351483.58009, 366963.265419 4351470.229202, 366860.629775 4351433.870215, 366666.990295 4351386.33499, 366469.580001 4351358.316752, 366270.360946 4351350.093974, 366005.750865 4351352.373961, 365833.676278 4351361.279142, 365663.006772 4351384.962158, 365495.009096 4351423.247229, 365104.010101 4351530.262086, 365030.137855 4351554.612663, 365018.707434 4351555.082983, 364855.550859 4351575.310903, 364694.606921 4351608.871082, 364555.612821 4351643.87218, 364372.044997 4351699.585196, 364289.383741 4351733.623481, 364156.900519 4351702.813056, 363966.334588 4351677.445525, 363774.213448 4351670.491878, 363464.87404 4351674.173802, 363347.336051 4351655.957139, 363216.49824 4351640.07375, 362919.68725 4351613.931366, 362886.859214 4351604.061726, 362782.157301 4351575.655888, 362683.159131 4351551.660103, 362516.905409 4351518.751258, 362498.911305 4351516.752004, 362443.085137 4351491.397187, 362215.207262 4351404.244737, 362129.20662 4351377.239991, 361962.43884 4351332.681702, 361792.450009 4351302.669517, 361733.374356 4351294.850865, 361685.154372 4351277.501087, 361582.797078 4351243.758593, 361452.803157 4351204.75594, 361189.893461 4351144.852023, 360980.889247 4351111.859876, 360887.214916 4351099.333606, 360641.224077 4351072.338317, 360561.773321 4351065.219634, 360259.771157 4351044.221967, 360077.149988 4351039.887107, 359849.150638 4351044.89286, 359694.008876 4351054.340026, 359385.505918 4351085.195644, 359355.39111 4351085.732773, 359170.14964 4351097.652236, 358972.150544 4351119.656656, 358775.693772 4351151.452184, 358583.369558 4351202.614826, 358397.082213 4351272.637993, 358218.676269 4351360.828345, 358049.918224 4351466.312662, 357892.479044 4351588.046484, 357747.917621 4351724.824458, 357617.66534 4351875.292269, 357503.011899 4352037.960052, 357405.092547 4352211.217142, 357324.876837 4352393.348026, 357263.159028 4352582.549324, 357220.550225 4352776.947649, 357197.472319 4352974.618156, 357194.153818 4353173.603599, 357210.627581 4353371.933713, 357246.730491 4353567.644721, 357302.105073 4353758.798781, 357352.225598 4353904.29853, 357427.637415 4354091.852112, 357521.596481 4354270.8353, 357633.142927 4354439.419636, 357761.137214 4354595.882892, 357904.271776 4354738.626666, 358061.084375 4354866.192715, 358229.973042 4354977.277845, 358409.212439 4355070.747231, 358625.660149 4355170.047113, 358819.546227 4355247.026693, 359020.396006 4355303.391868, 359226.024359 4355338.529418, 359434.194168 4355352.057067, 359589.792395 4355345.91408, 359618.668262 4355364.819503, 359621.75897 4355367.908294, 359737.669932 4355462.944005, 359785.336094 4355520.226914, 359927.040905 4355659.664101, 360081.888838 4355784.344092, 360248.349882 4355893.034954, 360424.779275 4355984.662741, 360567.519122 4356041.602196, 360212.854638 4356177.021159, 360021.95125 4356235.85428, 359832.355885 4356304.93643, 359650.686659 4356392.771723, 359478.79291 4356498.466023, 359318.424461 4356620.943395, 359171.213814 4356758.957059, 359038.659525 4356911.102077, 358922.110957 4357075.829663, 358822.754538 4357251.46294, 358741.601684 4357436.214017, 358679.478506 4357628.202186, 358673.89566 4357648.981343, 358500.560133 4357876.553536, 358394.037752 4358030.920093, 358302.443769 4358194.586198, 358234.753121 4358347.640704, 358164.236125 4358426.745805, 358084.926731 4358497.466214, 357955.096169 4358637.668953, 357839.238066 4358789.62185, 357518.202039 4359255.233645, 357421.820376 4359409.606816, 357339.870409 4359572.102058, 357273.030695 4359741.373891, 357221.854673 4359916.020723, 357177.4509 4360097.838215, 357132.579444 4360351.489041, 357116.560004 4360495.674662, 357048.943899 4360665.374155, 356993.930279 4360857.142266, 356964.678424 4361018.277716, 356959.617024 4361030.923861, 356897.76496 4361209.491528, 356853.042704 4361393.099833, 356825.849537 4361580.109516, 356807.465446 4361768.773831, 356798.199533 4361988.214044, 356813.051597 4362207.347065, 356851.842522 4362423.530156, 356943.760153 4362811.755367, 356995.426104 4362991.87308, 357063.722116 4363166.364959, 357148.048691 4363333.699324, 357247.665615 4363492.407324, 357361.698457 4363641.095831, 357489.146243 4363778.459664, 357628.890244 4363903.293054, 357779.703796 4364014.500219, 357940.263066 4364111.10499, 358109.158674 4364192.259376, 358211.707666 4364235.74507, 358262.409589 4364274.77768, 358424.657323 4364376.561856, 358595.897325 4364462.359336, 358774.559137 4364531.383264, 358888.975359 4364563.402887, 358972.813516 4364648.289001, 359032.017435 4364703.369375, 359220.610571 4364858.467994, 359426.698676 4364989.428465, 359488.767063 4365023.740837, 359706.782817 4365127.604223, 359935.727498 4365204.433935, 360008.382955 4365224.023734, 360063.12751 4365235.87981, 360198.021723 4365303.203535, 360387.387998 4365374.836606, 360583.026181 4365426.957469, 360646.134187 4365437.083065, 360630.087477 4365508.43073, 360606.468988 4365695.81375, 360573.024256 4365772.205422, 360570.016212 4365779.111517, 360446.269657 4366064.685945, 360361.273878 4366096.034806, 360176.777132 4366186.560209, 360002.543991 4366295.54053, 359840.414091 4366421.825101, 359610.882821 4366620.373598, 359484.734121 4366739.440936, 359369.377271 4366868.991399, 359265.680057 4367008.050428, 359143.67974 4367187.389079, 359039.368033 4367358.589162, 358952.719507 4367539.371996, 358884.60477 4367727.921149, 358835.708212 4367922.342153, 358791.666663 4368143.870964, 358763.643651 4368330.480431, 358753.332541 4368518.900343, 358760.825125 4368707.453368, 358786.054703 4368894.460991, 358831.089138 4369140.137255, 358875.683871 4369330.442189, 358938.641931 4369515.485267, 359019.361998 4369693.499112, 359117.0731 4369862.783484, 359230.841983 4370021.72152, 359359.58202 4370168.795178, 359502.063596 4370302.599732, 359656.925845 4370421.857193, 359822.689652 4370525.428513, 359993.93797 4370621.123363, 360202.946283 4370722.466861, 360876.696131 4371002.075796, 360862.860048 4371024.303564, 360774.531506 4371204.137062, 360704.638808 4371391.905613, 360653.883362 4371585.724866, 360628.793562 4371705.786775, 360598.571955 4371895.517095, 360586.694454 4372087.271794, 360593.270663 4372279.281412, 360618.239898 4372469.774134, 360661.371749 4372656.992144, 360722.268207 4372839.207844, 360769.304648 4372944.924752, 360792.009009 4373044.818226, 360856.538829 4373236.536566, 360864.84278 4373254.842432, 360884.386703 4373346.79386, 360944.309842 4373535.007589, 360976.042967 4373608.61593, 360904.680885 4373741.784013, 360810.369645 4373938.282605, 360756.896117 4374065.14947, 360690.468261 4374046.93454, 360499.728162 4374008.113689, 360294.364411 4373977.318202, 360086.914456 4373967.982866, 359879.614745 4373980.208323, 359674.700103 4374013.862774, 359426.593703 4374067.970681, 359221.866461 4374124.150491, 359024.247545 4374201.714519, 358826.614528 4374291.664442, 358632.944438 4374392.929984, 358451.479741 4374514.722337, 358319.212455 4374614.393096, 358156.34237 4374751.295487, 358008.937303 4374904.725196, 357878.665471 4375072.945821, 357824.491492 4375160.810334, 357706.596533 4375246.051369, 357544.400694 4375376.705187, 357518.819985 4375402.127294, 357382.486504 4375510.699162, 357282.769961 4375598.994613, 357219.740551 4375645.718479, 357070.847003 4375781.301218, 356936.342384 4375931.169411, 356817.590302 4376093.803697, 356715.794665 4376267.555289, 356631.987475 4376450.662697, 356567.018369 4376641.269578, 356539.37816 4376738.069302, 356497.519014 4376914.652905, 356484.681971 4377004.456393, 356315.556102 4377012.367404, 356139.927099 4377036.293332, 355967.106202 4377075.675234, 355798.450833 4377130.203787, 355610.061791 4377200.47654, 355431.180549 4377277.316185, 355260.617776 4377371.184019, 355066.597414 4377490.619022, 354901.615461 4377603.93915, 354748.786039 4377733.181803, 354609.639753 4377877.052602, 354485.570169 4378034.110662, 354377.819861 4378202.783027, 354287.46796 4378381.380423, 354187.713433 4378605.785117, 354125.68895 4378762.867409, 354077.138133 4378924.622475, 353919.858848 4379542.224166, 353877.736792 4379755.508712, 353845.153626 4379985.714512, 353835.414405 4380066.268712, 353811.312202 4380306.409114, 353801.491563 4380479.498669, 353806.697809 4380652.788409, 353826.891821 4380824.976217))'
+where wikidata_id ='Q117583';
+
+update parc--Soto Del Henares
+set area='POLYGON ((461742.649765 4481151.621948, 461768.609214 4481163.182096, 461783.258187 4481169.702422, 461965.961609 4481240.517814, 462154.717876 4481293.114699, 462347.715144 4481326.988208, 462543.100866 4481341.813195, 462738.999564 4481337.447355, 462933.530838 4481313.932598, 463124.827413 4481271.494636, 463311.053065 4481210.540825, 463490.420243 4481131.656252, 463661.20723 4481035.598116, 463821.774669 4480923.288464, 463970.581299 4480795.805339, 464106.198749 4480654.372431, 464227.325249 4480500.347331, 464332.798124 4480335.208502, 464421.604958 4480160.541084, 464426.501626 4480149.616177, 464497.99392 4479966.487872, 464551.162116 4479777.225444, 464585.492515 4479583.657503, 464600.653423 4479387.654261, 464596.498359 4479191.109458, 464573.06747 4478995.922068, 464530.587138 4478803.977948, 464469.4678 4478617.131619, 464390.299976 4478437.188351, 464293.84857 4478265.886716, 464181.045474 4478104.881792, 464052.980566 4477955.729175, 463910.891182 4477819.869943, 463756.150158 4477698.616739, 463590.252568 4477593.141085, 463414.801278 4477504.462064, 463400.303731 4477498.008396, 463374.717389 4477486.615114, 463192.006143 4477415.765629, 463003.238239 4477363.137434, 462810.225991 4477329.235799, 462614.822464 4477314.386208, 462418.903681 4477318.731226, 462224.350612 4477342.229138, 462033.031114 4477384.654348, 461846.782 4477445.599539, 461667.391404 4477524.479592, 461496.581612 4477620.537198, 461335.992529 4477732.850132, 461187.165932 4477860.340103, 461051.530669 4478001.78311, 460930.388943 4478155.821193, 460824.903807 4478320.975468, 460736.087998 4478495.660329, 460731.191377 4478506.585264, 460659.705403 4478689.697427, 460606.540271 4478878.942711, 460572.209558 4479072.492991, 460557.044902 4479268.478557, 460561.192796 4479465.006172, 460584.613169 4479660.177366, 460627.07978 4479852.106769, 460688.182397 4480038.940328, 460767.330765 4480218.873218, 460863.760304 4480390.167271, 460976.539498 4480551.167775, 461104.57889 4480700.319452, 461246.641611 4480836.181485, 461401.355324 4480957.441437, 461567.225481 4481062.927927, 461742.649765 4481151.621948))'
+where wikidata_id ='Q113559005';
 
 -- ----------------------------
 -- 3) SPACE_COMPLET (union)
 -- ----------------------------
 
--- Table staging unique des lieux : villes + espaces verts
--- Elle servira à charger la table finale PLACE dans le script 02
+-- Création de la table space_complet une jointure UNION ALL à partir des tables city et parc
 DROP TABLE IF EXISTS space_complet CASCADE;
 
--- UNION ALL = on concatène
 CREATE TABLE space_complet AS
 SELECT
-  space_label,
-  wikidata_id,
-  type_label,
-  ccaa_label,
-  province_label,
-  coordonnees,
-  elevation,
-  superficie AS area,
-  population
+   space_label,
+   wikidata_id,
+   type_label,
+   ccaa_label,
+   province_label,
+   coordonnees,
+   elevation,
+   superficie,
+   population,
+   area
 FROM city
-
 UNION ALL
-
 SELECT
-  space_label,
-  wikidata_id,
-  type_label,
-  ccaa_label,
-  province_label,
-  coordonnees,
-  NULL::NUMERIC(7,3) AS elevation, -- espaces verts : pas d'altitude
-  area,
-  NULL::INTEGER AS population      -- espaces verts : pas de population
-FROM espacesvert;
+   space_label,
+   wikidata_id,
+   type_label,
+   ccaa_label,
+   province_label,
+   coordonnees,
+   NULL::NUMERIC(7,3) AS elevation, --colonne qui n'existe pas dans espacesvert
+   superficie,
+   NULL::INTEGER AS population, --colonne qui n'existe pas dans espacesvert
+   area
+FROM parc;
 
 -- ============================================================
 -- ===================== FALCON (STAGING) =====================
@@ -381,9 +681,9 @@ SELECT
   NULLIF(BTRIM("heading"::text), '')::DOUBLE PRECISION,
 
   -- outlier bool -> int
-  CASE
-    WHEN "import-marked-outlier" IS TRUE  THEN 1
-    WHEN "import-marked-outlier" IS FALSE THEN 0
+ CASE
+    WHEN NULLIF(BTRIM("import-marked-outlier"::text), '')::boolean IS TRUE THEN 1
+    WHEN NULLIF(BTRIM("import-marked-outlier"::text), '')::boolean IS FALSE THEN 0
     ELSE NULL
   END,
 

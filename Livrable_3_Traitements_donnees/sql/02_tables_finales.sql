@@ -22,48 +22,71 @@ SET search_path TO CREC;
 -- But : avoir un référentiel unique "place" pour relier :
 --   - bird_detection.place_id (détections)
 --   - weather_station.place_id (stations météo)
-
--- On recrée la table à zéro
-DROP TABLE IF EXISTS place CASCADE;
-
--- Table finale PLACE
--- place_id = clé primaire auto-générée
-CREATE TABLE place (
-  place_id        INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  space_label     VARCHAR(255),
-  wikidata_id     VARCHAR(255),
-  type_label      VARCHAR(255),
-  ccaa_label      VARCHAR(255),
-  province_label  VARCHAR(255),
-  coordonnees     VARCHAR(255),      -- format "Point(lon lat)" (texte)
-  elevation       NUMERIC(7,3),
-  area            NUMERIC,
-  population      INTEGER
+drop table if exists place cascade;
+-- création de la table finale PLACE (créer les colonnes avec leurs intitulés) + création d'une clé primaire qui se remplit automatiquement en auto-incrémentation
+create table place (
+place_id INTEGER generated always as identity primary key, 
+space_label VARCHAR,
+wikidata_id VARCHAR,
+type_label VARCHAR,
+ccaa_label VARCHAR,
+province_label VARCHAR,
+coordonnees VARCHAR,
+elevation NUMERIC(7,3),
+superficie numeric,
+population INTEGER,
+area public.GEOMETRY(MULTIPOLYGON, 2154)
 );
 
--- Chargement depuis la table staging space_complet (script 01)
-INSERT INTO place (
-  space_label,
-  wikidata_id,
-  type_label,
-  ccaa_label,
-  province_label,
-  coordonnees,
-  elevation,
-  area,
-  population
-)
-SELECT
-  space_label,
-  wikidata_id,
-  type_label,
-  ccaa_label,
-  province_label,
-  coordonnees,
-  elevation,
-  area,
-  population
-FROM space_complet;
+-- insertion des données issues de space_complet dans la table finale PLACE
+insert into place (
+space_label,
+wikidata_id, 
+type_label, 
+ccaa_label, 
+province_label, 
+coordonnees, 
+elevation,  
+superficie, 
+population,
+area)
+select 
+space_label,
+wikidata_id, 
+type_label, 
+ccaa_label, 
+province_label, 
+coordonnees, 
+elevation,  
+superficie, 
+population,
+area
+from space_complet ;
+
+--Traitement des coordonnées
+ALTER TABLE place 
+ADD COLUMN latitude DOUBLE PRECISION,
+ADD COLUMN longitude DOUBLE PRECISION;
+-- nécessaire d'indiquer le schéma public car sinon au cours de l'exécution du script Python est confus face à Postgis
+-- qui pour lui a été crée dans le schema public et ne comprend pas pourquoi on l'appelle dans le schema crec.
+SELECT  
+    public.ST_X(public.ST_GeomFromText(coordonnees)) AS longitude,
+    public.ST_Y(public.ST_GeomFromText(coordonnees)) AS latitude
+FROM place
+WHERE coordonnees IS NOT NULL AND BTRIM(coordonnees) != '';
+
+UPDATE place
+SET 
+    longitude = public.ST_X(public.ST_GeomFromText(coordonnees))::DOUBLE PRECISION,
+    latitude = public.ST_Y(public.ST_GeomFromText(coordonnees))::DOUBLE PRECISION
+WHERE coordonnees IS NOT NULL
+AND BTRIM (coordonnees) !=''
+AND coordonnees LIKE '%POINT%'; --ajout d'une sécurité afin de ne traiter que ce qui ressemble à un Point.
+
+--changement de type de données pour coordonnees
+ALTER TABLE place 
+ALTER COLUMN coordonnees TYPE public.geometry(Point, 4326) 
+USING public.ST_GeomFromText(coordonnees, 4326);
 
 -- ============================================================
 -- 2) TABLE FINALE : FALCON
