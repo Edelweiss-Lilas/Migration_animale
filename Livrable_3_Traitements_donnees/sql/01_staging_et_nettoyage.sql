@@ -9,25 +9,24 @@
 --  - Préparer une météo propre dans une table unique
 -- ============================================================
 
--- Active l'extension unaccent (permet de comparer "Séville" et "Seville") ainsi que l'extension postgis afin de reconnaître le type de données GEOMETRY.
--- IF NOT EXISTS = ne fait rien si déjà installée
-CREATE EXTENSION IF NOT EXISTS unaccent;
-CREATE EXTENSION IF NOT EXISTS postgis SCHEMA crec;
-
 BEGIN; -- Début transaction : tout ou rien (propre et sûr)
 
 -- Crée le schéma "CREC" si besoin (comme un dossier de projet)
 CREATE SCHEMA IF NOT EXISTS CREC;
 
--- On travaille par défaut dans CREC (puis public si besoin)
+-- On travaille par défaut dans CREC. Il est nécessaire d'ajouter le schéma public pour l'utilisation de PostGis qui ne peut être que dans le schéma public car c'est sa place naturelle.
+-- Le schéma public n'est là que comme une bibliothèque de fonctions PostGis.
 SET search_path TO CREC, public;
 
+-- Active l'extension unaccent (permet de comparer "Séville" et "Seville") ainsi que l'extension postgis afin de reconnaître le type de données GEOMETRY.
+-- IF NOT EXISTS = ne fait rien si déjà installée
+CREATE EXTENSION IF NOT EXISTS unaccent;
+CREATE EXTENSION IF NOT EXISTS postgis;
 -- ============================================================
 -- PATCH : rendre la table brute kestrel34 insensible à la casse
 -- Si le CSV s'appelle KESTREL34.csv, Pandas crée une table "KESTREL34", 
 -- on renomme/normalise toujours vers "kestrel34"
 -- ============================================================
-
 DO $$
 BEGIN
   IF to_regclass('crec.kestrel34') IS NULL THEN
@@ -113,7 +112,7 @@ ID_faucons TEXT,
 date_passage DATE, 
 Ville_Espagne VARCHAR(50),
 geom_point GEOMETRY(POINT, 4326), 
-geom_poly geometry(MultiPolygon, 2154)
+geom_poly GEOMETRY(MultiPolygon, 2154)
 ); 
 
 -- certaines lignes du CSV contiennent des MultiPolygon (comme Ciudad Real qui a plusieurs polygones) donc geometry(MultiPolygon, 2154);
@@ -152,7 +151,7 @@ UPDATE polygones_parc
 SET
  parc_espagne  = REGEXP_REPLACE(
        REPLACE(
-           public.unaccent(TRIM(parc_espagne)),
+           unaccent(TRIM(parc_espagne)),
            '''',
            ''
        ),
@@ -193,7 +192,7 @@ UPDATE polygones_city
 SET
  ville_espagne  = REGEXP_REPLACE(
        REPLACE(
-           public.unaccent(TRIM(ville_espagne )),
+           unaccent(TRIM(ville_espagne )),
            '''',
            ''
        ),
@@ -340,7 +339,7 @@ UPDATE city
 SET
    space_label = REGEXP_REPLACE(
        REPLACE(
-           public.unaccent(TRIM(space_label)),
+           unaccent(TRIM(space_label)),
            '''',
            ''
        ),
@@ -350,7 +349,7 @@ SET
    ),
    ccaa_label = REGEXP_REPLACE(
        REPLACE(
-           public.unaccent(TRIM(ccaa_label)),
+           unaccent(TRIM(ccaa_label)),
            '''',
            ''
        ),
@@ -360,7 +359,7 @@ SET
    ),
    province_label = REGEXP_REPLACE(
        REPLACE(
-           public.unaccent(TRIM(province_label)),
+           unaccent(TRIM(province_label)),
            '''',
            ''
        ),
@@ -534,7 +533,7 @@ update parc
 SET
    space_label = REGEXP_REPLACE(
        REPLACE(
-           public.unaccent(TRIM(space_label)),
+           unaccent(TRIM(space_label)),
            '''',
            ''
        ),
@@ -544,7 +543,7 @@ SET
    ),
    ccaa_label = REGEXP_REPLACE(
        REPLACE(
-           public.unaccent(TRIM(ccaa_label)),
+           unaccent(TRIM(ccaa_label)),
            '''',
            ''
        ),
@@ -554,7 +553,7 @@ SET
    ),
    province_label = REGEXP_REPLACE(
        REPLACE(
-           public.unaccent(TRIM(province_label)),
+           unaccent(TRIM(province_label)),
            '''',
            ''
        ),

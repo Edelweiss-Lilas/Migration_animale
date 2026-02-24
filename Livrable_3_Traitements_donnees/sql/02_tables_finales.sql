@@ -13,8 +13,9 @@
 -- ============================================================
 
 BEGIN; -- Transaction : si un bloc plante, rien ne reste en base
-SET search_path TO CREC;
+SET search_path TO CREC, public; -- on précise le schéma pour éviter les confusions avec PostGIS
 
+CREATE EXTENSION IF NOT EXISTS postgis;
 -- ============================================================
 -- 1) TABLE FINALE : PLACE
 -- ============================================================
@@ -35,7 +36,7 @@ coordonnees VARCHAR,
 elevation NUMERIC(7,3),
 superficie numeric,
 population INTEGER,
-area public.GEOMETRY(MULTIPOLYGON, 2154)
+area GEOMETRY(MULTIPOLYGON, 2154)
 );
 
 -- insertion des données issues de space_complet dans la table finale PLACE
@@ -69,24 +70,23 @@ ADD COLUMN latitude DOUBLE PRECISION,
 ADD COLUMN longitude DOUBLE PRECISION;
 -- nécessaire d'indiquer le schéma public car sinon au cours de l'exécution du script Python est confus face à Postgis
 -- qui pour lui a été crée dans le schema public et ne comprend pas pourquoi on l'appelle dans le schema crec.
-SELECT  
-    public.ST_X(public.ST_GeomFromText(coordonnees)) AS longitude,
-    public.ST_Y(public.ST_GeomFromText(coordonnees)) AS latitude
+SELECT 
+    ST_X(ST_GeomFromText(coordonnees)) AS longitude,
+    ST_Y(ST_GeomFromText(coordonnees)) AS latitude
 FROM place
-WHERE coordonnees IS NOT NULL AND BTRIM(coordonnees) != '';
+WHERE coordonnees IS NOT NULL 
+  AND BTRIM(coordonnees) != '';
 
 UPDATE place
 SET 
-    longitude = public.ST_X(public.ST_GeomFromText(coordonnees))::DOUBLE PRECISION,
-    latitude = public.ST_Y(public.ST_GeomFromText(coordonnees))::DOUBLE PRECISION
-WHERE coordonnees IS NOT NULL
-AND BTRIM (coordonnees) !=''
-AND coordonnees LIKE '%POINT%'; --ajout d'une sécurité afin de ne traiter que ce qui ressemble à un Point.
+    longitude = ST_X(ST_GeomFromText(NULLIF(BTRIM(coordonnees), '')))::DOUBLE PRECISION,
+    latitude  = ST_Y(ST_GeomFromText(NULLIF(BTRIM(coordonnees), '')))::DOUBLE PRECISION
+WHERE coordonnees LIKE '%POINT%' OR coordonnees IS NULL;
 
 --changement de type de données pour coordonnees
 ALTER TABLE place 
-ALTER COLUMN coordonnees TYPE public.geometry(Point, 4326) 
-USING public.ST_GeomFromText(coordonnees, 4326);
+ALTER COLUMN coordonnees TYPE GEOMETRY(Point, 4326) 
+USING ST_GeomFromText(coordonnees, 4326);
 
 -- ============================================================
 -- 2) TABLE FINALE : FALCON
