@@ -13,9 +13,8 @@
 -- ============================================================
 
 BEGIN; -- Transaction : si un bloc plante, rien ne reste en base
-SET search_path TO CREC, public; -- on précise le schéma pour éviter les confusions avec PostGIS
+SET search_path TO CREC;
 
-CREATE EXTENSION IF NOT EXISTS postgis;
 -- ============================================================
 -- 1) TABLE FINALE : PLACE
 -- ============================================================
@@ -23,70 +22,48 @@ CREATE EXTENSION IF NOT EXISTS postgis;
 -- But : avoir un référentiel unique "place" pour relier :
 --   - bird_detection.place_id (détections)
 --   - weather_station.place_id (stations météo)
-drop table if exists place cascade;
--- création de la table finale PLACE (créer les colonnes avec leurs intitulés) + création d'une clé primaire qui se remplit automatiquement en auto-incrémentation
-create table place (
-place_id INTEGER generated always as identity primary key, 
-space_label VARCHAR,
-wikidata_id VARCHAR,
-type_label VARCHAR,
-ccaa_label VARCHAR,
-province_label VARCHAR,
-coordonnees VARCHAR,
-elevation NUMERIC(7,3),
-superficie numeric,
-population INTEGER,
-area GEOMETRY(MULTIPOLYGON, 2154)
+
+-- On recrée la table à zéro
+DROP TABLE IF EXISTS place CASCADE;
+
+-- Table finale PLACE
+-- place_id = clé primaire auto-générée
+CREATE TABLE place (
+  place_id        INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  space_label     VARCHAR(255),
+  wikidata_id     VARCHAR(255),
+  type_label      VARCHAR(255),
+  ccaa_label      VARCHAR(255),
+  province_label  VARCHAR(255),
+  coordonnees     VARCHAR(255),      -- format "Point(lon lat)" (texte)
+  elevation       NUMERIC(7,3),
+  area            NUMERIC,
+  population      INTEGER
 );
 
--- insertion des données issues de space_complet dans la table finale PLACE
-insert into place (
-space_label,
-wikidata_id, 
-type_label, 
-ccaa_label, 
-province_label, 
-coordonnees, 
-elevation,  
-superficie, 
-population,
-area)
-select 
-space_label,
-wikidata_id, 
-type_label, 
-ccaa_label, 
-province_label, 
-coordonnees, 
-elevation,  
-superficie, 
-population,
-area
-from space_complet ;
-
---Traitement des coordonnées
-ALTER TABLE place 
-ADD COLUMN latitude DOUBLE PRECISION,
-ADD COLUMN longitude DOUBLE PRECISION;
--- nécessaire d'indiquer le schéma public car sinon au cours de l'exécution du script Python est confus face à Postgis
--- qui pour lui a été crée dans le schema public et ne comprend pas pourquoi on l'appelle dans le schema crec.
-SELECT 
-    ST_X(ST_GeomFromText(coordonnees)) AS longitude,
-    ST_Y(ST_GeomFromText(coordonnees)) AS latitude
-FROM place
-WHERE coordonnees IS NOT NULL 
-  AND BTRIM(coordonnees) != '';
-
-UPDATE place
-SET 
-    longitude = ST_X(ST_GeomFromText(NULLIF(BTRIM(coordonnees), '')))::DOUBLE PRECISION,
-    latitude  = ST_Y(ST_GeomFromText(NULLIF(BTRIM(coordonnees), '')))::DOUBLE PRECISION
-WHERE coordonnees LIKE '%POINT%' OR coordonnees IS NULL;
-
---changement de type de données pour coordonnees
-ALTER TABLE place 
-ALTER COLUMN coordonnees TYPE GEOMETRY(Point, 4326) 
-USING ST_GeomFromText(coordonnees, 4326);
+-- Chargement depuis la table staging space_complet (script 01)
+INSERT INTO place (
+  space_label,
+  wikidata_id,
+  type_label,
+  ccaa_label,
+  province_label,
+  coordonnees,
+  elevation,
+  area,
+  population
+)
+SELECT
+  space_label,
+  wikidata_id,
+  type_label,
+  ccaa_label,
+  province_label,
+  coordonnees,
+  elevation,
+  area,
+  population
+FROM space_complet;
 
 -- ============================================================
 -- 2) TABLE FINALE : FALCON
@@ -316,5 +293,33 @@ ON weather_measurement (obs_date);
 
 CREATE INDEX ix_weather_measurement_time
 ON weather_measurement (time);
+
+-- ============================================================
+-- 6) TABLE FINALE : USER_ACCOUNT et COMMENT
+-- ============================================================
+-- Rôle : Cela permet de conserver les données une fois le compte utilisateur créer.
+
+DROP TABLE IF EXISTS user_account CASCADE;
+DROP TABLE IF EXISTS comment CASCADE;
+
+CREATE TABLE user_account (
+    user_id SERIAL PRIMARY KEY,
+    username VARCHAR(80) UNIQUE NOT NULL,
+    email VARCHAR(120) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    bio TEXT
+);
+
+CREATE TABLE comment (
+    comment_id SERIAL PRIMARY KEY,
+    content TEXT NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    user_id INTEGER NOT NULL REFERENCES crec.user_account(user_id),
+    falcon_id INTEGER NOT NULL REFERENCES crec.falcon(falcon_id)
+);
+
+-- Index pour accélérer les requêtes (ex: "tous les commentaires du faucon X")
+CREATE INDEX ix_comment_user_id ON comment (user_id);
+CREATE INDEX ix_comment_falcon_id ON comment (falcon_id);
 
 COMMIT; -- Fin

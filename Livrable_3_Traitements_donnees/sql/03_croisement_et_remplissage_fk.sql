@@ -20,7 +20,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS unaccent;
 
 -- On travaille dans CREC (et public en secours)
-SET search_path TO CREC, public; 
+SET search_path TO CREC, public;
 
 -- ============================================================
 -- 0) place_lat / place_lon depuis coordonnees (relançable)

@@ -148,19 +148,15 @@ class DataLoader:
                     sniffer = csv.Sniffer()
                     try:
                         dialect = sniffer.sniff(sample, delimiters=',;')
-                    except Exception:
-                        class DefaultDialect:
-                            delimiter = ','
-                            quotechar = '"'
-                            escapechar = None
-                            doublequote = True
-                            skipinitialspace = True
-                        dialect = DefaultDialect()
+                    except csv.Error:
+                        dialect = sniffer.sniff(sample)
                     has_header = sniffer.has_header(sample)
                     # Correction manuelle pour le fichier des communes
-                    if csv_file in ["communes_global.csv","falcon_city2.csv"]:
+                    if csv_file == "communes_global.csv":
                         dialect.delimiter = ","
-                        dialect.quotechar = '"'
+                        has_header = True
+                    else:
+                        has_header = sniffer.has_header(sample)
 
                     logger.info("Propriétés CSV détectées : delimiter={delimiter}, quotechar={quotechar}, escapechar={escapechar}, doublequote={doublequote}, skipinitialspace={skipinitialspace}".format(
                             delimiter = dialect.delimiter,
@@ -171,52 +167,31 @@ class DataLoader:
                         )
                     )
                     f.seek(0) 
-                    chunk_size = 3000 
-                    table_name = csv_file.replace(".csv", "")
-                    schema_name = os.environ.get("pgSchemaImportsCsv")
-                    
-                    first_chunk = True
-                    total_rows = 0
-
+                    df = pd.read_csv(
+                        f,
+                        sep=dialect.delimiter,
+                        quotechar=dialect.quotechar,
+                        escapechar=dialect.escapechar,
+                        doublequote=dialect.doublequote,
+                        skipinitialspace=True,
+                        header=0 if has_header else None,
+                        on_bad_lines='skip' 
+                    )
+                    logger.info(f"Nombre de lignes lues : {len(df)} dans {csv_file}")
                     try:
-                        # On crée l'itérateur (il ne lit pas encore tout le fichier)
-                        reader = pd.read_csv(
-                            f,
-                            sep=dialect.delimiter,
-                            quotechar=dialect.quotechar,
-                            header=0 if has_header else None,
-                            chunksize=chunk_size,
-                            on_bad_lines='skip',
-                            engine='c',
-                            dtype=str #permet d'éviter les erreurs de types
+                        logger.info("Début du transfert vers la base de données et la table " + os.environ.get("pgSchemaImportsCsv"))
+                        df.to_sql(
+                            csv_file.replace(".csv", ""),
+                            schema=os.environ.get("pgSchemaImportsCsv"),
+                            con=connection,
+                            if_exists="replace",
+                            index=False
                         )
-
-                        logger.info(f"Début du transfert vers {schema_name}.{table_name} par paquets de {chunk_size}...")
-
-                        for chunk in reader:
-                            # 'replace' pour vider la table au début, puis 'append' pour ajouter la suite
-                            mode = "replace" if first_chunk else "append"
-                            
-                            chunk.to_sql(
-                                table_name,
-                                schema=schema_name,
-                                con=connection,
-                                if_exists=mode,
-                                index=False
-                            )
-                            
-                            total_rows += len(chunk)
-                            first_chunk = False
-                            # Optionnel : un petit log tous les X lignes pour suivre l'avancement
-                            if total_rows % 5000 == 0:
-                                logger.info(f"Progression : {total_rows} lignes importées...")
-                        
                         connection.commit()
-                        logger.info(f"Success : {total_rows} lignes importées au total pour {csv_file}")
-
+                        logger.info(f"Success : {csv_file}")
                     except Exception as e:
                         connection.rollback()
-                        if(eval(os.environ.get("failOnFirstCsvError", "False"))):
+                        if(eval(os.environ.get("failOnFirstCsvError"))):
                             logger.error(f"Error {csv_file} : {e}")
                             exit()
                         else:

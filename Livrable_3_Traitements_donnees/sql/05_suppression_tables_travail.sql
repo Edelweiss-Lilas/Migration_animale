@@ -18,15 +18,9 @@ SET search_path TO CREC;
 -- Ces tables ne servent qu'au script 01 et au chargement dans place (script 02)
 -- Une fois place créée et remplie, on peut les supprimer
 DROP TABLE IF EXISTS city CASCADE;
-DROP TABLE IF EXISTS communes_global CASCADE;
-DROP TABLE IF EXISTS espacesvert_complet CASCADE;
 DROP TABLE IF EXISTS espacesvert CASCADE;
-DROP TABLE IF EXISTS parc CASCADE;
-DROP TABLE IF EXISTS "POLYGONES_PARC" CASCADE;
-drop table IF EXISTS polygones_parc CASCADE;
-drop table IF EXISTS polygones_city CASCADE; 
 DROP TABLE IF EXISTS space_complet CASCADE;
-DROP TABLE IF EXISTS falcon_city2 CASCADE;
+
 -- ----------------------------
 -- TABLES DE TRAVAIL : FALCON (staging)
 -- ----------------------------
@@ -62,5 +56,12 @@ DROP TABLE IF EXISTS meteo_palencia CASCADE;
 DROP TABLE IF EXISTS meteo_san_roque CASCADE;
 DROP TABLE IF EXISTS meteo_tarifa CASCADE;
 DROP TABLE IF EXISTS meteo_villarasa CASCADE;
+
+-- ----------------------------
+-- TABLES BRUTES : WIKIDATA / PLACE (CSV importés)
+-- ----------------------------
+-- Tables brutes d'origine (villes + espaces verts) déjà transformées en place
+DROP TABLE IF EXISTS communes_global CASCADE;
+DROP TABLE IF EXISTS espacesvert_complet CASCADE;
 
 COMMIT;
